@@ -82,7 +82,7 @@ document
 
 // show popup with a list of Patreon supportes (updated manually)
 async function showSupporters() {
-  const {supporters} = await import("../dynamic/supporters.js?v=1.97.14");
+  const {supporters} = await import("../dynamic/supporters.js?v=1.119.0");
   const list = supporters.split("\n").sort();
   const columns = window.innerWidth < 800 ? 2 : 5;
 
@@ -241,10 +241,22 @@ function toggleTranslateExtent(el) {
 }
 
 // add voice options
+let voiceAttempts = 0;
 const voiceInterval = setInterval(function () {
+  voiceAttempts++;
   const voices = speechSynthesis.getVoices();
-  if (voices.length) clearInterval(voiceInterval);
-  else return;
+  if (!voices.length) {
+    if (voiceAttempts < 10) return;
+
+    clearInterval(voiceInterval);
+    const select = byId("speakerVoice");
+    if (select && !select.options.length) {
+      select.options.add(new Option("No voices available", "", false));
+    }
+    return;
+  }
+
+  clearInterval(voiceInterval);
 
   const select = byId("speakerVoice");
   voices.forEach((voice, i) => {
@@ -715,7 +727,7 @@ function regeneratePrompt(options) {
   if (customization)
     return tip("New map cannot be generated when edit mode is active, please exit the mode and retry", false, "error");
   const workingTime = (Date.now() - last(mapHistory).created) / 60000; // minutes
-  if (workingTime < 5) return regenerateMap(options);
+  if (workingTime < 1) return regenerateMap(options);
 
   alertMessage.innerHTML = /* html */ `Are you sure you want to generate a new map?<br />
     All unsaved changes made to the current map will be lost`;

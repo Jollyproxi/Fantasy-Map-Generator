@@ -1761,7 +1761,9 @@
               </td>
             </tr>
 
-            <tr data-tip="Define burgs percentage to form a separate province">
+            <tr
+              data-tip="Set what share of eligible burgs in each state will become province centers. Higher values create more provinces"
+            >
               <td>
                 <i data-locked="0" id="lock_provincesRatio" class="icon-lock-open"></i>
               </td>
@@ -2111,6 +2113,13 @@
             <button id="overviewBurgsButton" data-tip="Click to open Burgs Overview" data-shortcut="Shift + T">
               Burgs
             </button>
+            <button
+              id="editCoastlineSettings"
+              data-tip="Click to open Coastline Settings Editor"
+              data-shortcut="Shift + L"
+            >
+              Coastlines
+            </button>
             <button id="editCulturesButton" data-tip="Click to open Cultures Editor" data-shortcut="Shift + C">
               Cultures
             </button>
@@ -2268,6 +2277,9 @@
               data-shortcut="Shift + A"
             >
               Charts
+            </button>
+            <button id="openMinimapButton" data-tip="Click to open minimap overview. Click minimap to center view">
+              Minimap
             </button>
           </div>
 
@@ -4170,6 +4182,13 @@
             </svg>
           </button>
 
+          <button id="brushFill" data-tip="Fill: click enclosed water or same-height land area to create a cone blob">
+            <svg viewBox="20 10 60 60" height="1em" width="1.6em">
+              <path d="M30,70 h40 M30,70 q0,-20 20,-20 q20,0 20,20" fill="none" stroke="#000" stroke-width="5" />
+              <path d="M50,20 v25 M50,20 l-10,8 M50,20 l10,8" fill="none" stroke="#000" stroke-width="5" />
+            </svg>
+          </button>
+
           <button id="brushLine" data-tip="Line: select two points to change heights along the line">
             <svg viewBox="0 -5 100 100" height="1em" width="1.6em">
               <path d="M0 90 L100 10" fill="none" stroke="#000" stroke-width="7"></path>
@@ -6004,6 +6023,10 @@
         </div>
       </div>
 
+      <div id="minimap" style="display: none" class="dialog stable">
+        <div id="minimapContent"></div>
+      </div>
+
       <div id="options3d" class="dialog stable" style="display: none">
         <div id="options3dMesh" style="display: none">
           <div data-tip="Set map rotation speed. Set to 0 is you want to toggle off the rotation">
@@ -6220,11 +6243,6 @@
           </button>
         </div>
         <p>Export in JSON format can be used as an API replacement.</p>
-
-        <p>
-          It's also possible to export map to <i>Foundry VTT</i>, see
-          <a href="https://github.com/Ethck/azgaar-foundry" target="_blank">the module.</a>
-        </p>
       </div>
 
       <div id="saveMapData" style="display: none" class="dialog">
@@ -8545,6 +8563,7 @@
     <script type="module" src="utils/index.ts"></script>
     <script type="module" src="modules/index.ts"></script>
     <script type="module" src="renderers/index.ts"></script>
+    <script type="module" src="controllers/index.ts"></script>
 
     <script defer src="config/heightmap-templates.js"></script>
     <script defer src="config/precreated-heightmaps.js"></script>
@@ -8554,15 +8573,15 @@
     <script defer src="modules/ui/layers.js?v=1.115.0"></script>
     <script defer src="modules/ui/measurers.js?v=1.99.00"></script>
     <script defer src="modules/ui/style-presets.js?v=1.100.00"></script>
-    <script defer src="modules/ui/general.js?v=1.113.1"></script>
-    <script defer src="modules/ui/options.js?v=1.113.5"></script>
-    <script defer src="main.js?v=1.115.0"></script>
+    <script defer src="modules/ui/general.js?v=1.116.2"></script>
+    <script defer src="modules/ui/options.js?v=1.118.0"></script>
+    <script defer src="main.js?v=1.117.0"></script>
 
     <script defer src="modules/ui/style.js?v=1.108.4"></script>
-    <script defer src="modules/ui/editors.js?v=1.112.1"></script>
-    <script defer src="modules/ui/tools.js?v=1.113.3"></script>
-    <script defer src="modules/ui/world-configurator.js?v=1.105.4"></script>
-    <script defer src="modules/ui/heightmap-editor.js?v=1.114.4"></script>
+    <script defer src="modules/ui/editors.js?v=1.119.0"></script>
+    <script defer src="modules/ui/tools.js?v=1.119.0"></script>
+    <script defer src="modules/ui/world-configurator.js?v=1.116.2"></script>
+    <script defer src="modules/ui/heightmap-editor.js?v=1.118.0"></script>
     <script defer src="modules/ui/provinces-editor.js?v=1.108.1"></script>
     <script defer src="modules/ui/biomes-editor.js?v=1.112.0"></script>
     <script defer src="modules/ui/namesbase-editor.js?v=1.105.11"></script>
@@ -8582,7 +8601,7 @@
     <script defer src="modules/ui/burg-editor.js?v=1.114.2"></script>
     <script defer src="modules/ui/units-editor.js?v=1.108.12"></script>
     <script defer src="modules/ui/notes-editor.js?v=1.107.3"></script>
-    <script defer src="modules/ui/ai-generator.js?v=1.108.8"></script>
+    <script defer src="modules/ui/ai-generator.js?v=1.116.2"></script>
     <script defer src="modules/ui/diplomacy-editor.js?v=1.99.00"></script>
     <script defer src="modules/ui/zones-editor.js?v=1.105.20"></script>
     <script defer src="modules/ui/burgs-overview.js?v=1.111.0"></script>
@@ -8598,12 +8617,12 @@
     <script defer src="modules/ui/3d.js?v=1.99.00"></script>
     <script defer src="modules/ui/submap-tool.js?v=1.106.2"></script>
     <script defer src="modules/ui/transform-tool.js?v=1.106.2"></script>
-    <script defer src="modules/ui/hotkeys.js?v=1.115.0"></script>
+    <script defer src="modules/ui/hotkeys.js?v=1.119.0"></script>
     <script defer src="libs/rgbquant.min.js"></script>
     <script defer src="libs/jquery.ui.touch-punch.min.js"></script>
-    <script defer src="modules/io/save.js?v=1.113.8"></script>
-    <script defer src="modules/io/load.js?v=1.115.0"></script>
+    <script defer src="modules/io/save.js?v=1.116.2"></script>
+    <script defer src="modules/io/load.js?v=1.116.2"></script>
     <script defer src="modules/io/cloud.js?v=1.114.0"></script>
-    <script defer src="modules/io/export.js?v=1.112.2"></script>
+    <script defer src="modules/io/export.js?v=1.116.2"></script>
   </body>
 </html>

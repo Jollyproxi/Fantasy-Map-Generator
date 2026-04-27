@@ -13,6 +13,7 @@ toolsContent.addEventListener("click", function (event) {
   else if (button === "editStatesButton") editStates();
   else if (button === "editProvincesButton") editProvinces();
   else if (button === "editDiplomacyButton") editDiplomacy();
+  else if (button === "editCoastlineSettings") editCoastlineSettings();
   else if (button === "editCulturesButton") editCultures();
   else if (button === "editReligions") editReligions();
   else if (button === "editEmblemButton") openEmblemEditor();
@@ -27,6 +28,7 @@ toolsContent.addEventListener("click", function (event) {
   else if (button === "overviewMilitaryButton") overviewMilitary();
   else if (button === "overviewMarkersButton") overviewMarkers();
   else if (button === "overviewCellsButton") viewCellDetails();
+  else if (button === "openMinimapButton") openMinimap();
 
   // click on Regenerate buttons
   if (event.target.parentNode.id === "regenerateFeature") {
@@ -327,8 +329,8 @@ function recreateStates() {
     const type = nomadic
       ? "Nomadic"
       : pack.cultures[culture].type === "Nomadic"
-      ? "Generic"
-      : pack.cultures[culture].type;
+        ? "Generic"
+        : pack.cultures[culture].type;
     const expansionism = rn(Math.random() * byId("sizeVariety").value + 1, 1);
 
     const cultureType = pack.cultures[culture].type;
@@ -898,8 +900,8 @@ function configMarkersGeneration() {
         <td><input class="type" value="${type}" /></td>
         <td style="position: relative">
           <img class="image" src="${isExternal ? icon : ""}" ${
-        isExternal ? "" : "hidden"
-      } style="width:1.2em; height:1.2em; vertical-align: middle;">
+            isExternal ? "" : "hidden"
+          } style="width:1.2em; height:1.2em; vertical-align: middle;">
           <span class="emoji" style="font-size:1.2em">${isExternal ? "" : icon}</span>
           <button class="changeIcon icon-pencil"></button>
         </td>
@@ -986,4 +988,9 @@ function viewCellDetails() {
 async function overviewCharts() {
   const Overview = await import("../dynamic/overview/charts-overview.js?v=1.99.00");
   Overview.open();
+}
+
+async function openMinimap() {
+  const Minimap = await import("./minimap.js?v=1.117.0");
+  Minimap.openMinimapDialog();
 }

@@ -140,6 +140,11 @@ function editHeightmap(options) {
       return;
     }
 
+    if (pressed.id === "brushFill") {
+      removeCircle();
+      return;
+    }
+
     moveCircle(x, y, heightmapBrushRadius.valueAsNumber, "#333");
   }
 
@@ -631,24 +636,34 @@ function editHeightmap(options) {
       byId("lineSlider").style.display = "none";
     }
 
-    const dragBrushThrottled = throttle(dragBrush, 100);
-
     function toggleBrushMode(event) {
-      if (event.target.classList.contains("pressed")) {
+      const button = event.target.closest("#brushesButtons > button");
+      if (!button) return;
+
+      if (button.classList.contains("pressed")) {
         exitBrushMode();
         return;
       }
 
       exitBrushMode();
-      event.target.classList.add("pressed");
+      button.classList.add("pressed");
+      toggleFillBrushUi(button.id === "brushFill");
 
-      if (event.target.id === "brushLine") {
+      if (button.id === "brushLine") {
         byId("lineSlider").style.display = "block";
         viewbox.style("cursor", "crosshair").on("click", placeLinearFeature);
+      } else if (button.id === "brushFill") {
+        byId("brushesSliders").style.display = "block";
+        viewbox.style("cursor", "crosshair").on("click", applyFillBrush);
       } else {
         byId("brushesSliders").style.display = "block";
-        viewbox.style("cursor", "crosshair").call(d3.drag().on("start", dragBrushThrottled));
+        viewbox.style("cursor", "crosshair").call(d3.drag().on("start", dragBrush));
       }
+    }
+
+    function toggleFillBrushUi(isFillBrush) {
+      const radiusRow = byId("heightmapBrushRadius").parentElement;
+      if (radiusRow) radiusRow.style.display = isFillBrush ? "none" : "";
     }
 
     function placeLinearFeature() {
@@ -702,6 +717,106 @@ function editHeightmap(options) {
       updateHistory();
     }
 
+    function applyFillBrush() {
+      const [x, y] = d3.mouse(this);
+      const start = findGridCell(x, y, grid);
+      const startHeight = grid.cells.h[start];
+      const isWaterFill = startHeight < 20;
+      const MIN_FILL_CELLS = 3;
+
+      if (cellTypeFilter.value === "water")
+        return tip("Fill brush is not available with 'only water cells' filter", false, "error");
+      if (cellTypeFilter.value === "land" && isWaterFill)
+        return tip("Land filter is active, water areas cannot be filled", false, "error");
+
+      const {selection, reachedBorder} = collectFillSelection(start, isWaterFill, startHeight);
+      if (selection.length < MIN_FILL_CELLS) return tip("No enclosed area found to fill", false, "error");
+      if (isWaterFill && reachedBorder)
+        return tip("Selected water area is open to map border and is not enclosed", false, "error");
+
+      const changed = applyConeToSelection(selection, isWaterFill, startHeight);
+      if (!changed.length) return;
+
+      mockHeightmapSelection(changed);
+      updateHeightmap();
+    }
+
+    function collectFillSelection(start, isWaterFill, targetHeight) {
+      const {h: heights, c: neighbors, i: cells} = grid.cells;
+      const visited = new Uint8Array(cells.length);
+      const stack = [start];
+      const selection = [];
+      let reachedBorder = false;
+
+      while (stack.length) {
+        const cell = stack.pop();
+        if (visited[cell]) continue;
+        visited[cell] = 1;
+
+        if (!matchesFillTarget(heights[cell], isWaterFill, targetHeight)) continue;
+
+        selection.push(cell);
+        if (grid.cells.b[cell]) reachedBorder = true;
+        neighbors[cell].forEach(next => {
+          if (!visited[next]) stack.push(next);
+        });
+      }
+
+      return {selection, reachedBorder};
+    }
+
+    function matchesFillTarget(height, isWaterFill, targetHeight) {
+      return isWaterFill ? height < 20 : height === targetHeight;
+    }
+
+    function applyConeToSelection(selection, isWaterFill, targetHeight) {
+      const power = heightmapBrushPower.valueAsNumber * 10;
+      const {h: heights, c: neighbors, i: cells} = grid.cells;
+      const inSelection = new Uint8Array(cells.length);
+      const edgeDistance = new Uint16Array(cells.length);
+      const changed = [];
+
+      selection.forEach(cell => {
+        inSelection[cell] = 1;
+      });
+
+      // Multi-source BFS from area edge gives each cell distance from edge.
+      const queue = [];
+      let head = 0;
+      selection.forEach(cell => {
+        const isEdgeCell = neighbors[cell].some(next => !inSelection[next]);
+        if (!isEdgeCell) return;
+        inSelection[cell] = 2;
+        queue.push(cell);
+      });
+
+      while (head < queue.length) {
+        const cell = queue[head++];
+        const nextDistance = edgeDistance[cell] + 1;
+        neighbors[cell].forEach(next => {
+          if (inSelection[next] !== 1) return;
+          inSelection[next] = 2;
+          edgeDistance[next] = nextDistance;
+          queue.push(next);
+        });
+      }
+
+      const maxDistance = d3.max(selection, cell => edgeDistance[cell]) || 0;
+      const baseHeight = isWaterFill ? 20 : targetHeight;
+
+      selection.forEach(cell => {
+        const ratio = maxDistance ? edgeDistance[cell] / maxDistance : 1;
+        const rise = Math.max(1, Math.round(power * ratio));
+        const nextHeight = minmax(baseHeight + rise, 0, 100);
+        if (nextHeight === heights[cell]) return;
+
+        heights[cell] = nextHeight;
+        changed.push(cell);
+      });
+
+      return changed;
+    }
+
     function dragBrush() {
       const r = heightmapBrushRadius.valueAsNumber;
       const [x, y] = d3.mouse(this);
@@ -732,7 +847,8 @@ function editHeightmap(options) {
       const heights = grid.cells.h;
 
       const brush = document.querySelector("#brushesButtons > button.pressed").id;
-      if (brush === "brushRaise") selection.forEach(i => (heights[i] = !ocean && heights[i] < 20 ? 20 : lim(heights[i] + power)));
+      if (brush === "brushRaise")
+        selection.forEach(i => (heights[i] = !ocean && heights[i] < 20 ? 20 : lim(heights[i] + power)));
       else if (brush === "brushElevate")
         selection.forEach(
           (i, d) => (heights[i] = lim(heights[i] + interpolate(d / Math.max(selection.length - 1, 1))))
@@ -747,7 +863,11 @@ function editHeightmap(options) {
         selection.forEach(
           i =>
             (heights[i] = rn(
-              (d3.mean(grid.cells.c[i].filter(c => (land ? heights[c] >= 20 : ocean ? heights[c] < 20 : 1)).map(c => heights[c])) +
+              (d3.mean(
+                grid.cells.c[i]
+                  .filter(c => (land ? heights[c] >= 20 : ocean ? heights[c] < 20 : 1))
+                  .map(c => heights[c])
+              ) +
                 heights[i] * (10 - power) +
                 0.6) /
                 (11 - power),
@@ -816,8 +936,10 @@ function editHeightmap(options) {
     }
 
     function startFromScratch() {
-      if (cellTypeFilter.value === "land") return tip("Not allowed when 'only land cells' filter is set", false, "error");
-      if (cellTypeFilter.value === "water") return tip("Not allowed when 'only water cells' filter is set", false, "error");
+      if (cellTypeFilter.value === "land")
+        return tip("Not allowed when 'only land cells' filter is set", false, "error");
+      if (cellTypeFilter.value === "water")
+        return tip("Not allowed when 'only water cells' filter is set", false, "error");
       const someHeights = grid.cells.h.some(h => h);
       if (!someHeights)
         return tip("Heightmap is already cleared, please do not click twice if not required", false, "error");
@@ -1479,8 +1601,8 @@ function editHeightmap(options) {
     function closeImageConverter(event) {
       event.preventDefault();
       event.stopPropagation();
-      alertMessage.innerHTML = /* html */ ` Are you sure you want to close the Image Converter? Click "Cancel" to geck back to convertion. Click "Complete" to apply
-      the conversion. Click "Close" to exit conversion mode and restore previous heightmap`;
+      alertMessage.innerHTML = /* html */ `Are you sure you want to close the Image Converter? Click "Cancel" to keep editing. Click "Complete" to apply
+      the conversion and close the tool. Click "Close" to discard the conversion and restore the previous heightmap.`;
 
       $("#alert").dialog({
         resizable: false,
