@@ -252,24 +252,11 @@
           <filter
             id="paper"
             name="Paper"
-            x="-20%"
-            y="-20%"
-            width="140%"
-            height="140%"
             filterUnits="objectBoundingBox"
             primitiveUnits="userSpaceOnUse"
             color-interpolation-filters="sRGB"
           >
-            <feGaussianBlur
-              stdDeviation="1 1"
-              x="0%"
-              y="0%"
-              width="100%"
-              height="100%"
-              in="SourceGraphic"
-              edgeMode="none"
-              result="blur"
-            />
+            <feGaussianBlur stdDeviation="1 1" in="SourceGraphic" edgeMode="none" result="blur" />
             <feTurbulence
               type="fractalNoise"
               baseFrequency="0.05 0.05"
@@ -288,39 +275,17 @@
               <feDistantLight azimuth="45" elevation="20" />
             </feDiffuseLighting>
             <feComposite in="diffuseLighting" in2="blur" operator="lighter" result="composite" />
-            <feComposite
-              in="composite"
-              in2="SourceGraphic"
-              operator="in"
-              x="0%"
-              y="0%"
-              width="100%"
-              height="100%"
-              result="composite1"
-            />
+            <feComposite in="composite" in2="SourceGraphic" operator="in" result="composite1" />
           </filter>
 
           <filter
             id="crumpled"
             name="Crumpled"
-            x="-20%"
-            y="-20%"
-            width="140%"
-            height="140%"
             filterUnits="objectBoundingBox"
             primitiveUnits="userSpaceOnUse"
             color-interpolation-filters="sRGB"
           >
-            <feGaussianBlur
-              stdDeviation="2 2"
-              x="0%"
-              y="0%"
-              width="100%"
-              height="100%"
-              in="SourceGraphic"
-              edgeMode="none"
-              result="blur"
-            />
+            <feGaussianBlur stdDeviation="2 2" in="SourceGraphic" edgeMode="none" result="blur" />
             <feTurbulence
               type="turbulence"
               baseFrequency="0.05 0.05"
@@ -339,16 +304,7 @@
               <feDistantLight azimuth="320" elevation="10" />
             </feDiffuseLighting>
             <feComposite in="diffuseLighting" in2="blur" operator="lighter" result="composite" />
-            <feComposite
-              in="composite"
-              in2="SourceGraphic"
-              operator="in"
-              x="0%"
-              y="0%"
-              width="100%"
-              height="100%"
-              result="composite1"
-            />
+            <feComposite in="composite" in2="SourceGraphic" operator="in" result="composite1" />
           </filter>
 
           <filter id="filter-grayscale" name="Grayscale">
@@ -1489,6 +1445,13 @@
             </tbody>
 
             <tbody id="styleVisibility">
+              <tr data-tip="Completely hide the selected labels group using display:none">
+                <td colspan="2">
+                  <input id="styleLabelsHideGroup" class="checkbox" type="checkbox" />
+                  <label for="styleLabelsHideGroup" class="checkbox-label">Hide selected group</label>
+                </td>
+              </tr>
+
               <tr data-tip="Allow system to hide labels if their size in too small or too big on that scale">
                 <td colspan="2">
                   <input id="hideLabels" class="checkbox" type="checkbox" onchange="invokeActiveZooming()" checked />
@@ -2372,6 +2335,15 @@
         </div>
 
         <div id="aboutContent" class="tabcontent">
+          <p style="text-align: center; margin-top: 1em">
+            <button
+              id="startTourButton"
+              onclick="UITour.start()"
+              data-tip="Take an interactive tour of the map generator"
+            >
+              &#9654; Take an Interactive Tour
+            </button>
+          </p>
           <p>
             <a href="https://github.com/Azgaar/Fantasy-Map-Generator" target="_blank">Fantasy Map Generator</a> is an
             <a href="https://github.com/Azgaar/Fantasy-Map-Generator/blob/master/LICENSE" target="_blank"
@@ -3003,23 +2975,22 @@
         <div id="elevationGraph" data-tip="Elevation profile"></div>
         <div style="text-align: center">
           <div id="epControls">
-            <span data-tip="Set height scale"
-              >Height scale: <input id="epScaleRange" type="range" min="1" max="100" value="50"
-            /></span>
             <span data-tip="Set curve profile"
               >Curve:
               <select id="epCurve">
                 <option>Linear</option>
-                <option selected>Basis spline</option>
                 <option>Bundle</option>
                 <option>Cubic Catmull-Rom</option>
-                <option>Monotone X</option>
+                <option selected>Monotone X</option>
                 <option>Natural</option>
               </select>
             </span>
             <span
               ><button id="epSave" data-tip="Download the chart data as a CSV file" class="icon-download"></button
             ></span>
+            <span><button id="epSaveSVG" data-tip="Download the chart as an SVG image">SVG</button></span>
+            <span><button id="epSavePNG" data-tip="Download the chart as a PNG image">PNG</button></span>
+            <span id="epstats" style="margin-left: 1em; color: #555; font-size: 0.85em"></span>
           </div>
         </div>
       </div>
@@ -4699,6 +4670,11 @@
           ></button>
           <button id="provincesChart" data-tip="Show provinces chart" class="icon-chart-area"></button>
           <button
+            id="provincesLocate"
+            data-tip="Click on the list first to select a province, then click to locate it on the map"
+            class="icon-target"
+          ></button>
+          <button
             id="provincesToggleLabels"
             data-tip="Toggle province labels. Change size in Menu ⭢ Style ⭢ Provinces"
             class="icon-font"
@@ -4729,6 +4705,7 @@
             data-tip="Add a new province. Hold Shift to add multiple"
             class="icon-plus"
           ></button>
+          <button id="provincesMerge" data-tip="Merge several provinces into one" class="icon-layer-group"></button>
           <button
             id="provincesRemoveAll"
             data-tip="Remove all provinces. States will remain as they are"
@@ -5551,7 +5528,7 @@
             class="icon-download"
           ></button>
           <button id="routesLockAll" data-tip="Lock or unlock all routes" class="icon-lock"></button>
-          <button id="routesRemoveAll" data-tip="Remove all routes" class="icon-trash"></button>
+          <button id="routesRemoveAll" data-tip="Remove all unlocked routes (locked routes are kept)" class="icon-trash"></button>
           <label for="routesSearch" data-tip="Filter by name or group" style="margin-left: 0.2em"
             >Search: <input id="routesSearch" type="search"
           /></label>
@@ -8570,59 +8547,66 @@
     <script defer src="libs/alea.min.js?v1.105.0"></script>
     <script defer src="libs/polylabel.min.js?v1.105.0"></script>
     <script defer src="libs/simplify.js?v1.105.6"></script>
-    <script defer src="modules/ui/layers.js?v=1.115.0"></script>
+    <script defer src="modules/ui/layers.js?v=1.122.2"></script>
     <script defer src="modules/ui/measurers.js?v=1.99.00"></script>
     <script defer src="modules/ui/style-presets.js?v=1.100.00"></script>
-    <script defer src="modules/ui/general.js?v=1.116.2"></script>
-    <script defer src="modules/ui/options.js?v=1.118.0"></script>
-    <script defer src="main.js?v=1.117.0"></script>
+    <script defer src="modules/ui/general.js?v=1.120.5"></script>
+    <script defer src="modules/ui/options.js?v=1.120.5"></script>
+    <script defer src="main.js?v=1.120.5"></script>
 
-    <script defer src="modules/ui/style.js?v=1.108.4"></script>
-    <script defer src="modules/ui/editors.js?v=1.119.0"></script>
-    <script defer src="modules/ui/tools.js?v=1.119.0"></script>
-    <script defer src="modules/ui/world-configurator.js?v=1.116.2"></script>
-    <script defer src="modules/ui/heightmap-editor.js?v=1.118.0"></script>
-    <script defer src="modules/ui/provinces-editor.js?v=1.108.1"></script>
+    <script defer src="modules/ui/style.js?v=1.122.0"></script>
+    <script defer src="modules/ui/editors.js?v=1.120.5"></script>
+    <script defer src="modules/ui/tools.js?v=1.120.5"></script>
+    <script defer src="modules/ui/world-configurator.js?v=1.120.5"></script>
+    <script defer src="modules/ui/heightmap-editor.js?v=1.120.5"></script>
+    <script defer src="modules/ui/provinces-editor.js?v=1.122.10"></script>
     <script defer src="modules/ui/biomes-editor.js?v=1.112.0"></script>
-    <script defer src="modules/ui/namesbase-editor.js?v=1.105.11"></script>
-    <script defer src="modules/ui/elevation-profile.js?v=1.99.00"></script>
+    <!-- namesbase-editor migrated to src/controllers/namesbase-editor.ts -->
+    <!-- elevation-profile migrated to src/controllers/elevation-profile.ts -->
     <script defer src="modules/ui/temperature-graph.js?v=1.106.6"></script>
-    <script defer src="modules/ui/routes-editor.js?v=1.104.3"></script>
-    <script defer src="modules/ui/routes-creator.js?v=1.104.3"></script>
-    <script defer src="modules/ui/route-group-editor.js?v=1.103.8"></script>
+    <script defer src="modules/ui/routes-editor.js?v=1.120.5"></script>
+    <script defer src="modules/ui/routes-creator.js?v=1.120.5"></script>
+    <script defer src="modules/ui/route-group-editor.js?v=1.120.5"></script>
     <script defer src="modules/ui/ice-editor.js?v=1.111.0"></script>
-    <script defer src="modules/ui/lakes-editor.js?v=1.106.0"></script>
-    <script defer src="modules/ui/coastline-editor.js?v=1.99.00"></script>
-    <script defer src="modules/ui/labels-editor.js?v=1.113.2"></script>
-    <script defer src="modules/ui/rivers-editor.js?v=1.106.0"></script>
+    <script defer src="modules/ui/lakes-editor.js?v=1.120.5"></script>
+    <script defer src="modules/ui/coastline-editor.js?v=1.120.5"></script>
+    <script defer src="modules/ui/labels-editor.js?v=1.120.5"></script>
+    <script defer src="modules/ui/rivers-editor.js?v=1.120.5"></script>
     <script defer src="modules/ui/rivers-creator.js?v=1.106.0"></script>
     <script defer src="modules/ui/relief-editor.js?v=1.99.00"></script>
-    <script defer src="modules/ui/burg-group-editor.js?v=1.114.5"></script>
-    <script defer src="modules/ui/burg-editor.js?v=1.114.2"></script>
-    <script defer src="modules/ui/units-editor.js?v=1.108.12"></script>
-    <script defer src="modules/ui/notes-editor.js?v=1.107.3"></script>
-    <script defer src="modules/ui/ai-generator.js?v=1.116.2"></script>
-    <script defer src="modules/ui/diplomacy-editor.js?v=1.99.00"></script>
-    <script defer src="modules/ui/zones-editor.js?v=1.105.20"></script>
-    <script defer src="modules/ui/burgs-overview.js?v=1.111.0"></script>
-    <script defer src="modules/ui/routes-overview.js?v=1.111.0"></script>
-    <script defer src="modules/ui/rivers-overview.js?v=1.111.0"></script>
+    <script defer src="modules/ui/burg-group-editor.js?v=1.120.5"></script>
+    <script defer src="modules/ui/burg-editor.js?v=1.120.5"></script>
+    <script defer src="modules/ui/units-editor.js?v=1.120.5"></script>
+    <script defer src="modules/ui/notes-editor.js?v=1.120.5"></script>
+    <script defer src="modules/ui/ai-generator.js?v=1.120.5"></script>
+    <script defer src="modules/ui/diplomacy-editor.js?v=1.120.5"></script>
+    <script defer src="modules/ui/zones-editor.js?v=1.120.5"></script>
+    <script defer src="modules/ui/burgs-overview.js?v=1.120.5"></script>
+    <script defer src="modules/ui/routes-overview.js?v=1.120.5"></script>
+    <script defer src="modules/ui/rivers-overview.js?v=1.120.5"></script>
     <script defer src="modules/ui/military-overview.js?v=1.108.5"></script>
     <script defer src="modules/ui/regiments-overview.js?v=1.108.5"></script>
-    <script defer src="modules/ui/markers-overview.js?v=1.111.0"></script>
-    <script defer src="modules/ui/regiment-editor.js?v=1.108.5"></script>
-    <script defer src="modules/ui/battle-screen.js?v=1.108.5"></script>
+    <script defer src="modules/ui/markers-overview.js?v=1.120.5"></script>
+    <script defer src="modules/ui/regiment-editor.js?v=1.120.5"></script>
+    <script defer src="modules/ui/battle-screen.js?v=1.120.5"></script>
     <script defer src="modules/ui/emblems-editor.js?v=1.99.00"></script>
-    <script defer src="modules/ui/markers-editor.js?v=1.108.5"></script>
+    <script defer src="modules/ui/markers-editor.js?v=1.120.5"></script>
     <script defer src="modules/ui/3d.js?v=1.99.00"></script>
-    <script defer src="modules/ui/submap-tool.js?v=1.106.2"></script>
-    <script defer src="modules/ui/transform-tool.js?v=1.106.2"></script>
-    <script defer src="modules/ui/hotkeys.js?v=1.119.0"></script>
+    <script defer src="modules/ui/submap-tool.js?v=1.120.5"></script>
+    <script defer src="modules/ui/transform-tool.js?v=1.120.5"></script>
+    <script defer src="modules/ui/hotkeys.js?v=1.120.5"></script>
     <script defer src="libs/rgbquant.min.js"></script>
     <script defer src="libs/jquery.ui.touch-punch.min.js"></script>
-    <script defer src="modules/io/save.js?v=1.116.2"></script>
-    <script defer src="modules/io/load.js?v=1.116.2"></script>
+    <script defer src="modules/io/save.js?v=1.120.5"></script>
+    <script defer src="modules/io/load.js?v=1.120.5"></script>
     <script defer src="modules/io/cloud.js?v=1.114.0"></script>
-    <script defer src="modules/io/export.js?v=1.116.2"></script>
+    <script defer src="modules/io/export.js?v=1.120.5"></script>
+    <div id="tourPromptButton" style="display: none" data-tip="Take an interactive tour of the map generator">
+      <button type="button" aria-label="Launch UI Tour">
+        <svg preserveAspectRatio="xMidYMid" viewBox="0 0 58 52" height="30px" width="30px">
+          <path d="M20 10 L20 42 L42 26 Z" />
+        </svg>
+      </button>
+    </div>
   </body>
 </html>

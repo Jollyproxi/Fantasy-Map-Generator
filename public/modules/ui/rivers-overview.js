@@ -5,7 +5,7 @@ function overviewRivers() {
   closeDialogs("#riversOverview, .stable");
   if (!layerIsOn("toggleRivers")) toggleRivers();
 
-  const body = byId("riversBody");
+  const body = ensureEl("riversBody");
   riversOverviewAddLines();
   $("#riversOverview").dialog();
 
@@ -20,13 +20,13 @@ function overviewRivers() {
   });
 
   // add listeners
-  byId("riversOverviewRefresh").on("click", riversOverviewAddLines);
-  byId("addNewRiver").on("click", toggleAddRiver);
-  byId("riverCreateNew").on("click", createRiver);
-  byId("riversBasinHighlight").on("click", toggleBasinsHightlight);
-  byId("riversExport").on("click", downloadRiversData);
-  byId("riversRemoveAll").on("click", triggerAllRiversRemove);
-  byId("riversSearch").on("input", riversOverviewAddLines);
+  ensureEl("riversOverviewRefresh").on("click", riversOverviewAddLines);
+  ensureEl("addNewRiver").on("click", toggleAddRiver);
+  ensureEl("riverCreateNew").on("click", createRiver);
+  ensureEl("riversBasinHighlight").on("click", toggleBasinsHightlight);
+  ensureEl("riversExport").on("click", downloadRiversData);
+  ensureEl("riversRemoveAll").on("click", triggerAllRiversRemove);
+  ensureEl("riversSearch").on("input", riversOverviewAddLines);
 
   // add line for each river
   function riversOverviewAddLines() {
@@ -38,7 +38,7 @@ function overviewRivers() {
     const riversById = new Map(pack.rivers.map(river => [river.i, river]));
 
     let filteredRivers = pack.rivers;
-    const searchText = byId("riversSearch").value.toLowerCase().trim();
+    const searchText = ensureEl("riversSearch").value.toLowerCase().trim();
     if (searchText) {
       filteredRivers = filteredRivers.filter(r => {
         const name = (r.name || "").toLowerCase();
@@ -65,7 +65,7 @@ function overviewRivers() {
         data-width="${r.width}"
         data-basin="${basin}"
       >
-        <span data-tip="Click to focus on river" class="icon-dot-circled pointer"></span>
+        <span data-tip="Click to focus on river" class="icon-target pointer"></span>
         <div data-tip="River name" style="margin-left: 0.4em;" class="riverName">${r.name}</div>
         <div data-tip="River type name" class="riverType">${r.type}</div>
         <div data-tip="River discharge (flux power)" class="biomeArea">${discharge}</div>
@@ -90,7 +90,7 @@ function overviewRivers() {
     // add listeners
     body.querySelectorAll("div.states").forEach(el => el.on("mouseenter", ev => riverHighlightOn(ev)));
     body.querySelectorAll("div.states").forEach(el => el.on("mouseleave", ev => riverHighlightOff(ev)));
-    body.querySelectorAll("div > span.icon-dot-circled").forEach(el => el.on("click", zoomToRiver));
+    body.querySelectorAll("div > span.icon-target").forEach(el => el.on("click", zoomToRiver));
     body.querySelectorAll("div > span.icon-pencil").forEach(el => el.on("click", openRiverEditor));
     body.querySelectorAll("div > span.icon-trash-empty").forEach(el => el.on("click", triggerRiverRemove));
 

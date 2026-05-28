@@ -107,7 +107,7 @@ function restoreCustomPresets() {
 
 // run on map generation
 function applyLayersPreset() {
-  const preset = localStorage.getItem("preset") || byId("layersPreset").value;
+  const preset = localStorage.getItem("preset") || ensureEl("layersPreset").value;
   setLayersPreset(preset);
 
   const layers = presets[preset]; // layers to be turned on
@@ -119,12 +119,12 @@ function applyLayersPreset() {
 }
 
 function setLayersPreset(preset) {
-  byId("layersPreset").value = preset;
+  ensureEl("layersPreset").value = preset;
   localStorage.setItem("preset", preset);
 
   const isDefault = getDefaultPresets()[preset];
-  byId("removePresetButton").style.display = isDefault ? "none" : "inline-block";
-  byId("savePresetButton").style.display = "none";
+  ensureEl("removePresetButton").style.display = isDefault ? "none" : "inline-block";
+  ensureEl("savePresetButton").style.display = "none";
 }
 
 // toggle layers on manual preset change
@@ -139,12 +139,12 @@ function handleLayersPresetChange(preset) {
     if (isOn && !shouldBeOn) el.click();
   });
 
-  if (byId("canvas3d")) setTimeout(() => ThreeD.update(), 400);
+  if (ensureEl("canvas3d")) setTimeout(() => ThreeD.update(), 400);
 }
 
 function savePreset() {
   prompt("Please provide a preset name", {default: ""}, preset => {
-    presets[preset] = Array.from(byId("mapLayers").querySelectorAll("li:not(.buttonoff)"))
+    presets[preset] = Array.from(ensureEl("mapLayers").querySelectorAll("li:not(.buttonoff)"))
       .map(node => node.id)
       .sort();
     layersPreset.add(new Option(preset, preset, false, true));
@@ -197,7 +197,10 @@ function drawLayers() {
   if (layerIsOn("toggleCells")) drawCells();
   if (layerIsOn("toggleGrid")) drawGrid();
   if (layerIsOn("toggleCoordinates")) drawCoordinates();
-  if (layerIsOn("toggleCompass")) compass.style("display", "block");
+  if (layerIsOn("toggleCompass")) {
+    if (!compass.select("use").size()) compass.append("use").attr("xlink:href", "#defs-compass-rose");
+    compass.style("display", "block");
+  }
   if (layerIsOn("toggleRivers")) drawRivers();
   if (layerIsOn("toggleRelief")) drawReliefIcons();
   if (layerIsOn("toggleReligions")) drawReligions();
@@ -271,7 +274,7 @@ function drawBiomes() {
     bodyPaths.push(getGappedFillPaths("biome", fill, waterGap, color, index));
   });
 
-  byId("biomes").innerHTML = bodyPaths.join("");
+  ensureEl("biomes").innerHTML = bodyPaths.join("");
 
   TIME && console.timeEnd("drawBiomes");
 }
@@ -408,7 +411,7 @@ function drawCells() {
   const cells = customization === 1 ? grid.cells.i : pack.cells.i;
   const polygon = customization === 1 ? getGridPolygon : getPackPolygon;
   const paths = Array.from(cells).map(i => "M" + polygon(i));
-  byId("cells").innerHTML = `<path d="${paths.join("")}" />`;
+  ensureEl("cells").innerHTML = `<path d="${paths.join("")}" />`;
 }
 
 function toggleIce(event) {
@@ -449,7 +452,7 @@ function drawCultures() {
     bodyPaths.push(getGappedFillPaths("culture", fill, waterGap, color, index));
   });
 
-  byId("cults").innerHTML = bodyPaths.join("");
+  ensureEl("cults").innerHTML = bodyPaths.join("");
 
   TIME && console.timeEnd("drawCultures");
 }
@@ -478,7 +481,7 @@ function drawReligions() {
     bodyPaths.push(getGappedFillPaths("religion", fill, waterGap, color, index));
   });
 
-  byId("relig").innerHTML = bodyPaths.join("");
+  ensureEl("relig").innerHTML = bodyPaths.join("");
 
   TIME && console.timeEnd("drawReligions");
 }
@@ -519,9 +522,9 @@ function drawStates() {
     }
   });
 
-  byId("statesBody").innerHTML = bodyPaths.join("");
-  byId("statePaths").innerHTML = renderHalo ? clipPaths.join("") : "";
-  byId("statesHalo").innerHTML = renderHalo ? haloPaths.join("") : "";
+  ensureEl("statesBody").innerHTML = bodyPaths.join("");
+  ensureEl("statePaths").innerHTML = renderHalo ? clipPaths.join("") : "";
+  ensureEl("statesHalo").innerHTML = renderHalo ? haloPaths.join("") : "";
 
   TIME && console.timeEnd("drawStates");
 }
@@ -568,11 +571,11 @@ function drawProvinces() {
       return /* html */ `<text x="${x}" y="${y}" id="provinceLabel${p.i}">${p.name}</text>`;
     });
 
-  byId("provs").innerHTML = /* html */ `
+  ensureEl("provs").innerHTML = /* html */ `
     <g id='provincesBody'>${bodyPaths.join("")}</g>
     <g id='provinceLabels'>${labels.join("")}</g>
   `;
-  byId("provinceLabels").style.display = byId("provs").dataset.labels === "1" ? "block" : "none";
+  ensureEl("provinceLabels").style.display = ensureEl("provs").dataset.labels === "1" ? "block" : "none";
 
   TIME && console.timeEnd("drawProvinces");
 }
@@ -655,7 +658,7 @@ function drawCoordinates() {
   const labels = coordinates.append("g").attr("id", "coordinateLabels");
 
   const point = new DOMPoint(scale + desired + 2, scale + desired / 2);
-  const p = point.matrixTransform(byId("viewbox").getScreenCTM().inverse());
+  const p = point.matrixTransform(ensureEl("viewbox").getScreenCTM().inverse());
 
   const data = graticule.lines().map(d => {
     const isLatitude = d.coordinates[0][1] === d.coordinates[1][1];
@@ -694,6 +697,7 @@ function drawCoordinates() {
 function toggleCompass(event) {
   if (!layerIsOn("toggleCompass")) {
     turnButtonOn("toggleCompass");
+    if (!compass.select("use").size()) compass.append("use").attr("xlink:href", "#defs-compass-rose");
     $("#compass").fadeIn();
     if (event && isCtrlClick(event)) editStyle("compass");
   } else {
@@ -813,7 +817,7 @@ function drawRoutes() {
     routePaths[group].push(`<path id="route${i}" d="${Routes.getPath(route)}"/>`);
   }
 
-  routes.selectAll("path").remove();
+  routes.attr("fill", "none").selectAll("path").remove();
   for (const group in routePaths) {
     routes.select("#" + group).html(routePaths[group].join(""));
   }
@@ -924,7 +928,7 @@ function toggleZones(event) {
 }
 
 function drawZones() {
-  const filterBy = byId("zonesFilterType").value;
+  const filterBy = ensureEl("zonesFilterType").value;
   const isFiltered = filterBy && filterBy !== "all";
   const visibleZones = pack.zones.filter(
     ({hidden, cells, type}) => !hidden && cells.length && (!isFiltered || type === filterBy)
@@ -972,16 +976,16 @@ function getGappedFillPaths(elementName, fill, waterGap, color, index) {
 }
 
 function layerIsOn(el) {
-  return byId(el).classList.contains("buttonoff") ? false : true;
+  return ensureEl(el).classList.contains("buttonoff") ? false : true;
 }
 
 function turnButtonOff(el) {
-  byId(el).classList.add("buttonoff");
+  ensureEl(el).classList.add("buttonoff");
   getCurrentPreset();
 }
 
 function turnButtonOn(el) {
-  byId(el).classList.remove("buttonoff");
+  ensureEl(el).classList.remove("buttonoff");
   getCurrentPreset();
 }
 

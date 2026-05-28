@@ -5,7 +5,7 @@ function overviewRoutes() {
   closeDialogs("#routesOverview, .stable");
   if (!layerIsOn("toggleRoutes")) toggleRoutes();
 
-  const body = byId("routesBody");
+  const body = ensureEl("routesBody");
   routesOverviewAddLines();
   $("#routesOverview").dialog();
 
@@ -20,12 +20,12 @@ function overviewRoutes() {
   });
 
   // add listeners
-  byId("routesOverviewRefresh").on("click", routesOverviewAddLines);
-  byId("routesCreateNew").on("click", createRoute);
-  byId("routesExport").on("click", downloadRoutesData);
-  byId("routesLockAll").on("click", toggleLockAll);
-  byId("routesRemoveAll").on("click", triggerAllRoutesRemove);
-  byId("routesSearch").on("input", routesOverviewAddLines);
+  ensureEl("routesOverviewRefresh").on("click", routesOverviewAddLines);
+  ensureEl("routesCreateNew").on("click", createRoute);
+  ensureEl("routesExport").on("click", downloadRoutesData);
+  ensureEl("routesLockAll").on("click", toggleLockAll);
+  ensureEl("routesRemoveAll").on("click", triggerAllRoutesRemove);
+  ensureEl("routesSearch").on("input", routesOverviewAddLines);
 
   // add line for each route
   function routesOverviewAddLines() {
@@ -34,7 +34,7 @@ function overviewRoutes() {
 
     let filteredRoutes = pack.routes;
 
-    const searchText = byId("routesSearch").value.toLowerCase().trim();
+    const searchText = ensureEl("routesSearch").value.toLowerCase().trim();
     if (searchText) {
       filteredRoutes = filteredRoutes.filter(route => {
         const name = (route.name || "").toLowerCase();
@@ -56,7 +56,7 @@ function overviewRoutes() {
         data-group="${route.group}"
         data-length="${route.length}"
       >
-        <span data-tip="Click to focus on route" class="icon-dot-circled pointer"></span>
+        <span data-tip="Click to focus on route" class="icon-target pointer"></span>
         <div data-tip="Route name" style="width: 15em; margin-left: 0.4em;">${route.name}</div>
         <div data-tip="Route group" style="width: 8em;">${route.group}</div>
         <div data-tip="Route length" style="width: 6em;">${length}</div>
@@ -77,7 +77,7 @@ function overviewRoutes() {
     // add listeners
     body.querySelectorAll("div.states").forEach(el => el.on("mouseenter", routeHighlightOn));
     body.querySelectorAll("div.states").forEach(el => el.on("mouseleave", routeHighlightOff));
-    body.querySelectorAll("div > span.icon-dot-circled").forEach(el => el.on("click", zoomToRoute));
+    body.querySelectorAll("div > span.icon-target").forEach(el => el.on("click", zoomToRoute));
     body.querySelectorAll("div > span.icon-pencil").forEach(el => el.on("click", openRouteEditor));
     body.querySelectorAll("div > span.locks").forEach(el => el.on("click", toggleLockStatus));
     body.querySelectorAll("div > span.icon-trash-empty").forEach(el => el.on("click", triggerRouteRemove));
@@ -153,7 +153,7 @@ function overviewRoutes() {
     });
 
     routesOverviewAddLines();
-    byId("routesLockAll").className = allLocked ? "icon-lock" : "icon-lock-open";
+    ensureEl("routesLockAll").className = allLocked ? "icon-lock" : "icon-lock-open";
   }
 
   function triggerRouteRemove() {
@@ -171,16 +171,41 @@ function overviewRoutes() {
   }
 
   function triggerAllRoutesRemove() {
-    alertMessage.innerHTML = /* html */ `Are you sure you want to remove all routes? This action can't be undone`;
+    const toRemove = pack.routes.filter(route => !route.lock);
+    if (!toRemove.length) {
+      if (!pack.routes.length) {
+        tip("There are no routes to remove", false, "error");
+      } else {
+        tip("All routes are locked. Unlock routes to remove them, or use Lock all to unlock first.", false, "error");
+      }
+      return;
+    }
+
+    const lockedCount = pack.routes.length - toRemove.length;
+    alertMessage.innerHTML =
+      lockedCount > 0
+        ? /* html */ `Remove all <b>unlocked</b> routes (${toRemove.length})? <b>${lockedCount}</b> locked route(s) will be kept. This cannot be undone.`
+        : /* html */ `Are you sure you want to remove all routes? This action can't be undone`;
+
     $("#alert").dialog({
       resizable: false,
-      title: "Remove all routes",
+      title: lockedCount > 0 ? "Remove unlocked routes" : "Remove all routes",
       buttons: {
         Remove: function () {
-          pack.cells.routes = {};
-          pack.routes = [];
-          routes.selectAll("path").remove();
-
+          const routesToRemove = pack.routes.filter(route => !route.lock);
+          if (!routesToRemove.length) {
+            if (!pack.routes.length) {
+              tip("There are no routes to remove", false, "error");
+            } else {
+              tip("All routes are now locked; nothing was removed.", false, "error");
+            }
+            $(this).dialog("close");
+            return;
+          }
+          for (const route of routesToRemove) {
+            Routes.remove(route);
+          }
+          pack.cells.routes = Routes.buildLinks(pack.routes);
           routesOverviewAddLines();
           $(this).dialog("close");
         },
