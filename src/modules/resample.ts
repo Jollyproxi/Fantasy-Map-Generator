@@ -98,6 +98,7 @@ class Resampler {
     pack.cells.burg = new Uint16Array(pack.cells.i.length);
     pack.cells.religion = new Uint16Array(pack.cells.i.length);
     pack.cells.province = new Uint16Array(pack.cells.i.length);
+    pack.cells.good = new Uint16Array(pack.cells.i.length);
 
     const parentPackCellGroups = this.groupCellsByType(parentMap.pack);
     const parentPackLandCellsQuadtree = quadtree(parentPackCellGroups.land);
@@ -109,7 +110,9 @@ class Resampler {
       const parentPackCell = parentPackLandCellsQuadtree.find(x, y, Infinity)?.[2];
       if (parentPackCell === undefined) continue;
       const parentCellArea = parentMap.pack.cells.area[parentPackCell];
-      const areaRatio = pack.cells.area[newPackCell] / parentCellArea;
+      // parentCellArea may be 0 for tiny boundary cells truncated by Uint16 storage;
+      // fall back to 1 to avoid 0 * Infinity = NaN in cells.pop (Float32Array)
+      const areaRatio = pack.cells.area[newPackCell] / (parentCellArea || 1);
       const scaleRatio = areaRatio / scale;
 
       pack.cells.biome[newPackCell] = parentMap.pack.cells.biome[parentPackCell];
@@ -120,7 +123,30 @@ class Resampler {
       pack.cells.state[newPackCell] = parentMap.pack.cells.state[parentPackCell];
       pack.cells.religion[newPackCell] = parentMap.pack.cells.religion[parentPackCell];
       pack.cells.province[newPackCell] = parentMap.pack.cells.province[parentPackCell];
+      pack.cells.good[newPackCell] = parentMap.pack.cells.good?.[parentPackCell] || 0;
     }
+  }
+
+  private restoreEconomy(parentMap: ParentMapDefinition) {
+    pack.goods = parentMap.pack.goods;
+    Goods.sync();
+
+    // Drop markets whose center burg is no longer on the map.
+    pack.markets = (parentMap.pack.markets || []).filter(market => {
+      const burg = pack.burgs[market.centerBurgId];
+      return Boolean(burg && !burg.removed);
+    });
+
+    Markets.expandTerritories(pack.markets);
+
+    // Reset market stocks so Production.produce() starts from a clean slate
+    // (territory boundaries changed, so inherited parent stocks would be stale).
+    for (const market of pack.markets) {
+      market.goods = {};
+    }
+
+    pack.deals = [];
+    Production.produce();
   }
 
   private restoreRivers(
@@ -447,6 +473,7 @@ class Resampler {
     this.restoreFeatureDetails(parentMap, inverse);
     this.restoreMarkers(parentMap, projection);
     this.restoreZones(parentMap, projection, scale);
+    this.restoreEconomy(parentMap);
 
     showStatistics();
   }
