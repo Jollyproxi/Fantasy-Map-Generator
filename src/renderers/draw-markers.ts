@@ -1,3 +1,4 @@
+import { select } from "d3";
 import { rn } from "../utils";
 
 interface Marker {
@@ -21,7 +22,6 @@ interface Marker {
 declare global {
   var drawMarkers: () => void;
   var drawMarker: (marker: Marker, rescale?: number) => string;
-  var getPin: (shape?: string, fill?: string, stroke?: string) => string;
 }
 
 type PinShapeFunction = (fill: string, stroke: string) => string;
@@ -70,7 +70,7 @@ function markerRenderer(marker: Marker, rescale = 1): string {
 
   return /* html */ `
     <svg id="${id}" viewbox="0 0 30 30" width="${zoomSize}" height="${zoomSize}" x="${viewX}" y="${viewY}">
-      <g>${getPin(pin, fill, stroke)}</g>
+      <g>${getPinForShape(pin, fill, stroke)}</g>
       <text x="${dx}%" y="${dy}%" font-size="${px}px" >${isExternal ? "" : icon}</text>
       <image x="${dx / 2}%" y="${dy / 2}%" width="${px}px" height="${px}px" href="${isExternal ? icon : ""}" />
     </svg>`;
@@ -79,18 +79,19 @@ function markerRenderer(marker: Marker, rescale = 1): string {
 const markersRenderer = (): void => {
   TIME && console.time("drawMarkers");
 
-  const rescale = +markers.attr("rescale");
-  const pinned = +markers.attr("pinned");
+  const rescale = +select("#markers").attr("rescale");
+  const pinned = +select("#markers").attr("pinned");
 
   const markersData: Marker[] = pinned
     ? (pack.markers || []).filter((marker: Marker) => marker.pinned)
     : pack.markers || [];
   const html = markersData.map(marker => markerRenderer(marker, rescale));
-  markers.html(html.join(""));
+  select("#markers").html(html.join(""));
 
   TIME && console.timeEnd("drawMarkers");
 };
 
 window.drawMarkers = markersRenderer;
 window.drawMarker = markerRenderer;
-window.getPin = getPinForShape;
+
+export { getPinForShape as getPin, markerRenderer as drawMarker, markersRenderer as drawMarkers };
