@@ -1,20 +1,20 @@
-import { type D3DragEvent, drag, polygonArea, type Selection, select } from "d3";
-import { closeDialogs } from "@/components/dialog/dialog-helpers";
+import { type D3DragEvent, drag, type Selection, select } from "d3";
+import { closeDialogs, destroyDialog } from "@/components/dialog/dialog-helpers";
+import { Layers } from "@/components/layers";
 import { tip } from "@/components/tooltips";
 import { applyDefaultViewboxEvents } from "@/components/viewbox-events";
+import { Coastline } from "@/generators/coastline-generator";
 import type { Feature } from "@/generators/features";
-import { drawBiomes } from "@/renderers/draw-biomes";
-import { drawBorders } from "@/renderers/draw-borders";
-import { getFeaturePath } from "@/renderers/draw-features";
+import { GraphOverride } from "@/generators/graph-override";
 import { getArea, getAreaUnit } from "@/utils";
-import { destroyDialogIfExists, ensureEl, findEl, getPackPolygon, rn, si, unique } from "../utils";
+import { ensureEl, findEl, rn, si, unique } from "../utils";
 
 let selectedCoastline: Selection<SVGElement, unknown, HTMLElement, unknown>;
 
 function open(element: SVGElement): void {
   if (customization) return;
   closeDialogs(".stable");
-  if (layerIsOn("toggleCells")) toggleCells();
+  Layers.hide("cells");
 
   renderDialog();
 
@@ -33,7 +33,7 @@ function open(element: SVGElement): void {
 }
 
 function renderDialog(): void {
-  destroyDialogIfExists("coastlineEditor");
+  destroyDialog("coastlineEditor");
 
   const html = /* html */ `<div id="coastlineEditor" class="dialog">
     <button id="coastlineGroupsShow" data-tip="Show the group selection" class="icon-tags"></button>
@@ -50,13 +50,13 @@ function renderDialog(): void {
   ensureEl("dialogs").insertAdjacentHTML("beforeend", html);
 
   // add listeners — dropped together with the dialog HTML on close
-  ensureEl("coastlineGroupsShow").on("click", showGroupSection);
-  ensureEl("coastlineGroup").on("change", changeCoastlineGroup);
-  ensureEl("coastlineGroupAdd").on("click", toggleNewGroupInput);
-  ensureEl("coastlineGroupName").on("change", createNewGroup);
-  ensureEl("coastlineGroupRemove").on("click", removeCoastlineGroup);
-  ensureEl("coastlineGroupsHide").on("click", hideGroupSection);
-  ensureEl("coastlineEditStyle").on("click", editGroupStyle);
+  ensureEl("coastlineGroupsShow").addEventListener("click", showGroupSection);
+  ensureEl("coastlineGroup").addEventListener("change", changeCoastlineGroup);
+  ensureEl("coastlineGroupAdd").addEventListener("click", toggleNewGroupInput);
+  ensureEl("coastlineGroupName").addEventListener("change", createNewGroup);
+  ensureEl("coastlineGroupRemove").addEventListener("click", removeCoastlineGroup);
+  ensureEl("coastlineGroupsHide").addEventListener("click", hideGroupSection);
+  ensureEl("coastlineEditStyle").addEventListener("click", editGroupStyle);
 }
 
 function getFeature(): Feature {
@@ -75,7 +75,7 @@ function drawCoastlineVertices(): void {
     .data(neibCells)
     .enter()
     .append("polygon")
-    .attr("points", (d: number) => getPackPolygon(d, pack))
+    .attr("points", (d: number) => String(Pack.getPolygon(d)))
     .attr("data-c", (d: number) => d);
 
   select<SVGGElement, unknown>("#debug")
@@ -101,14 +101,14 @@ function handleVertexDrag(
   event: D3DragEvent<SVGCircleElement, number, number>,
   vertexId: number
 ): void {
-  const { vertices, features } = pack;
+  const { features } = pack;
 
   const x = rn(event.x, 2);
   const y = rn(event.y, 2);
   this.setAttribute("cx", String(x));
   this.setAttribute("cy", String(y));
 
-  vertices.p[vertexId] = [x, y];
+  GraphOverride.movePackVertex(vertexId, [x, y]);
 
   const featureId = +selectedCoastline.attr("data-f");
   const feature = features[featureId];
@@ -116,27 +116,18 @@ function handleVertexDrag(
   // change coastline path
   select<SVGElement, unknown>("#deftemp")
     .select(`#featurePaths > path#feature_${featureId}`)
-    .attr("d", getFeaturePath(feature));
-
-  // update area
-  const points = feature.vertices.map(vertex => vertices.p[vertex] as [number, number]);
-  feature.area = Math.abs(polygonArea(points));
+    .attr("d", Coastline.getFeaturePath(feature));
   ensureEl("coastlineArea").innerHTML = `${si(getArea(feature.area))} ${getAreaUnit()}`;
 
   // update cell
   select("#debug")
     .select("#vertices")
     .selectAll<SVGPolygonElement, number>("polygon")
-    .attr("points", d => getPackPolygon(d, pack));
+    .attr("points", d => String(Pack.getPolygon(d)));
 }
 
 function handleVertexDragEnd(): void {
-  if (layerIsOn("toggleStates")) drawStates();
-  if (layerIsOn("toggleProvinces")) drawProvinces();
-  if (layerIsOn("toggleBorders")) drawBorders();
-  if (layerIsOn("toggleBiomes")) drawBiomes();
-  if (layerIsOn("toggleReligions")) drawReligions();
-  if (layerIsOn("toggleCultures")) drawCultures();
+  Layers.draw("states", "provinces", "borders", "biomes", "religions", "cultures");
 }
 
 function showGroupSection(): void {
@@ -170,6 +161,16 @@ function selectCoastlineGroup(node: SVGElement): void {
 
 function changeCoastlineGroup(this: HTMLSelectElement): void {
   ensureEl(this.value).appendChild(selectedCoastline.node()!);
+  assignGroup([selectedCoastline.node()!], this.value);
+}
+
+function assignGroup(elements: Element[], group: string): void {
+  for (const element of elements) {
+    const feature = pack.features[+(element.getAttribute("data-f") || 0)];
+    if (!feature) continue;
+
+    feature.group = group;
+  }
 }
 
 function toggleNewGroupInput(): void {
@@ -213,6 +214,7 @@ function createNewGroup(this: HTMLInputElement): void {
     ensureEl<HTMLSelectElement>("coastlineGroup").selectedOptions[0].remove();
     ensureEl<HTMLSelectElement>("coastlineGroup").options.add(new Option(group, group, false, true));
     oldGroup.id = group;
+    assignGroup(Array.from(oldGroup.children), group);
     toggleNewGroupInput();
     ensureEl<HTMLInputElement>("coastlineGroupName").value = "";
     return;
@@ -224,6 +226,7 @@ function createNewGroup(this: HTMLInputElement): void {
   newGroup.id = group;
   ensureEl<HTMLSelectElement>("coastlineGroup").options.add(new Option(group, group, false, true));
   ensureEl(group).appendChild(selectedCoastline.node()!);
+  assignGroup([selectedCoastline.node()!], group);
 
   toggleNewGroupInput();
   ensureEl<HTMLInputElement>("coastlineGroupName").value = "";
@@ -248,6 +251,7 @@ function removeCoastlineGroup(): void {
         $(this).dialog("close");
         const sea = ensureEl("sea_island");
         const groupEl = ensureEl(group);
+        assignGroup(Array.from(groupEl.children), "sea_island");
         while (groupEl.childNodes.length) {
           sea.appendChild(groupEl.childNodes[0]);
         }
@@ -270,7 +274,7 @@ function editGroupStyle(): void {
 function closeCoastlineEditor(): void {
   select("#debug").select("#vertices").remove();
   applyDefaultViewboxEvents();
-  destroyDialogIfExists("coastlineEditor");
+  destroyDialog("coastlineEditor");
 }
 
 export const CoastlineVertexEditor = { open };

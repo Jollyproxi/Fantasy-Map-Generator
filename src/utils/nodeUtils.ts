@@ -2,37 +2,43 @@ import { pointer } from "d3";
 
 /**
  * @param id - The ID of the element to retrieve
- * @typeParam T - The type of the element to retrieve, extending HTMLElement
+ * @typeParam T - The type of the element to retrieve, HTMLElement unless a SVG element is requested
  * @returns The element with the specified ID, cast to the specified type
  */
-export const ensureEl = <T extends HTMLElement>(id: string): T => {
+export const ensureEl = <T extends Element = HTMLElement>(id: string): T => {
   const el = document.getElementById(id);
   if (!el) {
     // TODO: throw an error instead of logging it, and handle it properly in the caller
     ERROR && console.error(`Element with id "${id}" not found.`);
     // TOBE: throw new Error(`Element with id "${id}" not found.`);
   }
-  return el as T;
+  return el as unknown as T;
 };
 
 /**
  * @param id - The ID of the element to retrieve
- * @typeParam T - The type of the element to retrieve, extending HTMLElement
+ * @typeParam T - The type of the element to retrieve, HTMLElement unless a SVG element is requested
  * @returns The element with the specified ID, cast to the specified type, or null if not found
  */
-export const findEl = <T extends HTMLElement>(id: string): T | null => {
-  return document.getElementById(id) as T | null;
+export const findEl = <T extends Element = HTMLElement>(id: string): T | null => {
+  return document.getElementById(id) as unknown as T | null;
 };
 
 /**
- * Remove an element, destroying its jQuery UI dialog widget first if it has one
- * @param {string} id - The ID of the element to remove
+ * Create an svg element
+ * @param tag - The svg element name, e.g. "g" or "use"
+ * @param id - The id to assign
+ * @param attrs - Attributes to set on the element
  */
-export const destroyDialogIfExists = (id: string): void => {
-  const el = findEl(id);
-  if (!el) return;
-  if (el.classList.contains("ui-dialog-content")) window.$(el).dialog("destroy");
-  el.remove();
+export const createEl = <T extends Element = SVGElement>(
+  tag: string,
+  id: string,
+  attrs: Record<string, string> = {}
+): T => {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  el.id = id;
+  for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+  return el as unknown as T;
 };
 
 /**
@@ -66,6 +72,7 @@ export const getPointer = (event: any, node?: Element | null): [number, number] 
 
 /**
  * Generate a unique ID for a given core string
+ * @deprecated Unwanted DOM dependency
  * @param {string} core - The core string for the ID
  * @param {number} [i=1] - The starting index
  * @returns {string} - The unique ID

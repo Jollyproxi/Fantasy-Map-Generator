@@ -1,5 +1,6 @@
 import { pointer } from "d3";
 import { closeDialogs, refreshEditors } from "@/components/dialog/dialog-helpers";
+import { Layers } from "@/components/layers";
 import { stopMapPlacement, toggleMapPlacement } from "@/components/map-placement";
 import { tip } from "@/components/tooltips";
 
@@ -16,12 +17,12 @@ function toggle(): void {
     "Click on map to place new river or extend an existing one. Hold Shift to place multiple rivers",
     "warn"
   );
-  if (!layerIsOn("toggleRivers")) toggleRivers();
+  Layers.show("rivers");
 }
 
 function addOnClick(event: MouseEvent): void {
   const point = pointer(event, event.currentTarget as SVGGElement);
-  const cell = findCell(point[0], point[1]);
+  const cell = Pack.findCell(point[0], point[1]);
   if (cell === undefined) return;
   if (pack.cells.r[cell]) {
     tip("There is already a river here", false, "error");
@@ -39,7 +40,7 @@ function addOnClick(event: MouseEvent): void {
     return;
   }
 
-  drawRivers();
+  Layers.draw("rivers");
   if (!event.shiftKey) {
     Lakes.cleanupLakeData();
     stopMapPlacement();

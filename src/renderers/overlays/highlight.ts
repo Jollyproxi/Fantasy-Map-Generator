@@ -1,7 +1,7 @@
 import { easeBounceOut, easeLinear, easeSinIn, select, transition } from "d3";
 import { parseTransform } from "@/utils";
 
-const debugLayer = () => select(debug.node() as SVGGElement);
+const debugLayer = () => select<SVGGElement, unknown>("#debug");
 
 function getBBox(element: Element): DOMRect {
   const attr = (name: string) => Number(element.getAttribute(name));
@@ -70,7 +70,9 @@ export function highlightEmblemElement(type: string, element: { i: number; [key:
 
   const [x, y] = element.pole || cells.p[element.center];
   const owner = type === "state" ? cells.state : cells.province;
-  const borderCells = cells.i.filter(id => owner[id] === element.i && cells.c[id].some(n => owner[n] !== element.i));
+  const borderCells = Array.from(cells.i).filter(
+    id => owner[id] === element.i && cells.c[id].some(n => owner[n] !== element.i)
+  );
   const rays = borderCells
     .filter((_cellId, index) => !(index % 2))
     .map(cellId => cells.p[cellId])

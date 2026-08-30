@@ -1,21 +1,24 @@
 import { drag, type Selection, select } from "d3";
-import { closeDialogs, confirmationDialog } from "@/components/dialog/dialog-helpers";
+import { closeDialogs, confirmationDialog, destroyDialog } from "@/components/dialog/dialog-helpers";
+import { Layers } from "@/components/layers";
 import { clearMainTip, tip } from "@/components/tooltips";
 import { Controllers } from "@/controllers";
-import type { Route } from "@/generators/routes-generator";
+import { type Route, UNNAMED_ROUTE } from "@/generators/routes-generator";
 import { speak } from "@/utils";
-import { destroyDialogIfExists, ensureEl, findEl, getPackPolygon, getPointer, getSegmentId, rn } from "../utils";
+import { ensureEl, findEl, getPointer, getSegmentId, rn } from "../utils";
 
 let selectedRoute: Selection<SVGElement, unknown, HTMLElement, unknown>;
+
+let isCellsLayerForced = false; // the cells layer is turned on for the editing mode
 
 function open(id: string): void {
   if (customization) return;
   if (findEl("routeEditor") && id === selectedRoute.attr("id")) return;
   closeDialogs(".stable");
 
-  if (!layerIsOn("toggleRoutes")) toggleRoutes();
-  ensureEl("toggleCells").dataset.forced = String(+!layerIsOn("toggleCells"));
-  if (!layerIsOn("toggleCells")) toggleCells();
+  Layers.show("routes");
+  isCellsLayerForced = !Layers.isOn("cells");
+  Layers.show("cells");
 
   selectedRoute = select<SVGElement, unknown>(`#${id}`).on("click", addControlPoint);
 
@@ -45,7 +48,7 @@ function open(id: string): void {
 }
 
 function renderDialog(): void {
-  destroyDialogIfExists("routeEditor");
+  destroyDialog("routeEditor");
 
   const html = /* html */ `<div id="routeEditor" class="dialog">
     <div id="routeBody" style="padding-bottom: 0.3em">
@@ -79,19 +82,19 @@ function renderDialog(): void {
   ensureEl("dialogs").insertAdjacentHTML("beforeend", html);
 
   // add listeners — dropped together with the dialog HTML on close
-  ensureEl("routeCreateSelectingCells").on("click", showCreationDialog);
-  ensureEl("routeSplit").on("click", togglePressed);
-  ensureEl("routeJoin").on("click", openJoinRoutesDialog);
-  ensureEl("routeElevationProfile").on("click", showRouteElevationProfile);
-  ensureEl("routeLegend").on("click", editRouteLegend);
-  ensureEl("routeLock").on("click", toggleLockButton);
-  ensureEl("routeRemove").on("click", removeRoute);
-  ensureEl("routeName").on("input", changeName);
-  ensureEl("routeNameSpeak").on("click", () => speak(ensureEl<HTMLInputElement>("routeName").value));
-  ensureEl("routeGroup").on("input", changeGroup);
-  ensureEl("routeGroupEdit").on("click", openRouteGroupsEditor);
-  ensureEl("routeEditStyle").on("click", editRouteGroupStyle);
-  ensureEl("routeGenerateName").on("click", generateName);
+  ensureEl("routeCreateSelectingCells").addEventListener("click", showCreationDialog);
+  ensureEl("routeSplit").addEventListener("click", togglePressed);
+  ensureEl("routeJoin").addEventListener("click", openJoinRoutesDialog);
+  ensureEl("routeElevationProfile").addEventListener("click", showRouteElevationProfile);
+  ensureEl("routeLegend").addEventListener("click", editRouteLegend);
+  ensureEl("routeLock").addEventListener("click", toggleLockButton);
+  ensureEl("routeRemove").addEventListener("click", removeRoute);
+  ensureEl("routeName").addEventListener("input", changeName);
+  ensureEl("routeNameSpeak").addEventListener("click", () => speak(ensureEl<HTMLInputElement>("routeName").value));
+  ensureEl("routeGroup").addEventListener("input", changeGroup);
+  ensureEl("routeGroupEdit").addEventListener("click", openRouteGroupsEditor);
+  ensureEl("routeEditStyle").addEventListener("click", editRouteGroupStyle);
+  ensureEl("routeGenerateName").addEventListener("click", generateName);
 }
 
 function openRouteGroupsEditor(): void {
@@ -104,7 +107,7 @@ function getRoute(): Route {
 }
 
 function updateRouteData(route: Route): void {
-  route.name = route.name || Routes.generateName(route);
+  route.name = route.name || Routes.generateName(route) || UNNAMED_ROUTE;
   ensureEl<HTMLInputElement>("routeName").value = route.name;
 
   const routeGroup = ensureEl<HTMLSelectElement>("routeGroup");
@@ -143,7 +146,7 @@ function drawCells(points: number[][]): void {
     .selectAll("polygon")
     .data(points)
     .join("polygon")
-    .attr("points", (p: number[]) => getPackPolygon(p[2], pack));
+    .attr("points", (p: number[]) => String(Pack.getPolygon(p[2])));
 }
 
 function dragControlPoint(event: any): void {
@@ -157,7 +160,7 @@ function dragControlPoint(event: any): void {
 
     const x = rn(dragEvent.x, 2);
     const y = rn(dragEvent.y, 2);
-    const cellId = findCell(x, y);
+    const cellId = Pack.findCell(x, y);
 
     this.__data__ = route.points[pointIndex] = [x, y, cellId!];
     redrawRoute(route);
@@ -165,7 +168,7 @@ function dragControlPoint(event: any): void {
   });
 
   event.on("end", () => {
-    const movedToCell = findCell(event.x, event.y);
+    const movedToCell = Pack.findCell(event.x, event.y);
 
     if (movedToCell !== initCell) {
       const prev = route.points[pointIndex - 1];
@@ -187,12 +190,13 @@ function redrawRoute(route: Route): void {
   selectedRoute.attr("d", Routes.getPath(route));
   updateRouteLength(route);
   if (findEl("elevationProfile")) showRouteElevationProfile();
+  Layers.draw("labels");
 }
 
 function addControlPoint(this: any, event: any): void {
   const route = getRoute();
   const [x, y] = getPointer(event, this);
-  const cellId = findCell(x, y);
+  const cellId = Pack.findCell(x, y);
 
   const point = [rn(x, 2), rn(y, 2), cellId!];
   const isNewCell = !route.points.some(p => p[2] === cellId);
@@ -302,7 +306,7 @@ function openJoinRoutesDialog(): void {
 
   if (candidateRoutes.length) {
     const options = candidateRoutes.map((r: Route) => {
-      r.name = r.name || Routes.generateName(r);
+      r.name = r.name || Routes.generateName(r) || UNNAMED_ROUTE;
       r.length = r.length || Routes.getLength(r.i);
       const length = `${rn(r.length * distanceScale)} ${distanceUnitInput.value}`;
       return `<option value="${r.i}">${r.name} (${length})</option>`;
@@ -402,7 +406,7 @@ function changeGroup(this: HTMLInputElement): void {
 
 function generateName(): void {
   const route = getRoute();
-  route.name = ensureEl<HTMLInputElement>("routeName").value = Routes.generateName(route);
+  route.name = ensureEl<HTMLInputElement>("routeName").value = Routes.generateName(route) || UNNAMED_ROUTE;
 }
 
 function showRouteElevationProfile(): void {
@@ -450,6 +454,7 @@ function removeRoute(): void {
     confirm: "Remove",
     onConfirm: () => {
       Routes.remove(getRoute());
+      Layers.draw("labels");
       $("#routeEditor").dialog("close");
     }
   });
@@ -462,11 +467,10 @@ function closeRouteEditor(): void {
   selectedRoute.on("click", null);
   clearMainTip();
 
-  const forced = +ensureEl("toggleCells").dataset.forced!;
-  ensureEl("toggleCells").dataset.forced = "0";
-  if (forced && layerIsOn("toggleCells")) toggleCells();
+  if (isCellsLayerForced) Layers.hide("cells");
+  isCellsLayerForced = false;
 
-  destroyDialogIfExists("routeEditor");
+  destroyDialog("routeEditor");
 }
 
 export const RouteEditor = { open };

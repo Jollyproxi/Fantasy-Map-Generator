@@ -1,9 +1,13 @@
 // Save the whole .map project to storage, machine or cloud
 
 import { closeDialogs } from "@/components/dialog/dialog-helpers";
+import { Layers } from "@/components/layers";
 import { tip } from "@/components/tooltips";
+import { GraphOverride } from "@/generators/graph-override";
 import { Services } from "@/services";
 import { getUsedFonts } from "@/services/fonts";
+import { savedMessage } from "@/services/platform";
+
 import { VERSION } from "@/services/versioning";
 import { ensureEl, getFileName, link, parseError, rn } from "@/utils";
 
@@ -72,9 +76,9 @@ function prepareMapData(): string {
     "", // previously used for precOutput.value, part of options now
     JSON.stringify(options),
     mapName.value,
-    +hideLabels.checked,
+    "", // previously used for hideLabels
     stylePreset.value,
-    +rescaleLabels.checked,
+    "", // previously used for rescaleLabels
     urbanDensity,
     "", // previously used for longitudeOutput.value, part of options now
     ensureEl<HTMLInputElement>("growthRate").value
@@ -83,6 +87,8 @@ function prepareMapData(): string {
   const notesData = JSON.stringify(notes);
   const measurers = JSON.stringify(pack.measurers ?? []);
   const fonts = JSON.stringify(getUsedFonts(ensureEl("map") as Element as SVGSVGElement));
+  const layers = JSON.stringify(Layers.state);
+  const graphOverride = JSON.stringify(GraphOverride.state);
 
   // save svg
   const cloneEl = ensureEl("map").cloneNode(true) as SVGSVGElement;
@@ -91,6 +97,12 @@ function prepareMapData(): string {
   cloneEl.setAttribute("width", String(graphWidth));
   cloneEl.setAttribute("height", String(graphHeight));
   cloneEl.querySelector("#viewbox")?.removeAttribute("transform");
+
+  // relief icons are stored in pack.relief, the layer holds only the currently visible ones
+  const cloneTerrain = cloneEl.querySelector("#terrain");
+  if (cloneTerrain) cloneTerrain.innerHTML = "";
+
+  for (const group of Array.from(cloneEl.querySelectorAll("#emblems > g"))) group.innerHTML = "";
 
   const cloneRuler = cloneEl.querySelector("#ruler");
   if (cloneRuler) cloneRuler.innerHTML = ""; // always remove rulers
@@ -109,6 +121,7 @@ function prepareMapData(): string {
   const religions = JSON.stringify(pack.religions);
   const provinces = JSON.stringify(pack.provinces);
   const rivers = JSON.stringify(pack.rivers);
+  const relief = JSON.stringify(pack.relief || []);
   const markers = JSON.stringify(pack.markers);
   const cellRoutes = JSON.stringify(pack.cells.routes);
   const routes = JSON.stringify(pack.routes);
@@ -117,6 +130,8 @@ function prepareMapData(): string {
   const goods = JSON.stringify(pack.goods);
   const markets = JSON.stringify(pack.markets || []);
   const deals = JSON.stringify(pack.deals || []);
+  const labels = JSON.stringify(pack.addedLabels || []);
+  const styleData = JSON.stringify(style);
 
   // store custom good icons
   const goodIconsEl = ensureEl("good-icons");
@@ -185,7 +200,12 @@ function prepareMapData(): string {
     deals,
     pack.cells.market,
     customGoodIcons,
-    measurers
+    measurers,
+    labels,
+    styleData,
+    relief,
+    layers,
+    graphOverride
   ].join("\r\n");
   return mapData;
 }
@@ -207,7 +227,7 @@ function saveToMachine(mapData: string, filename: string): void {
   link.href = URL;
   link.click();
 
-  tip('Map is saved to the "Downloads" folder (CTRL + J to open)', true, "success", 8000);
+  tip(savedMessage("Map"), true, "success", 8000);
   setTimeout(() => window.URL.revokeObjectURL(URL), 5000);
 }
 

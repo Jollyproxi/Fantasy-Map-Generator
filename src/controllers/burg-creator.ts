@@ -1,7 +1,9 @@
 import { pointer } from "d3";
 import { closeDialogs, refreshEditors } from "@/components/dialog/dialog-helpers";
+import { Layers } from "@/components/layers";
 import { stopMapPlacement, toggleMapPlacement } from "@/components/map-placement";
 import { tip } from "@/components/tooltips";
+import { redrawEmblem } from "@/renderers/draw-emblems";
 
 function toggle(): void {
   if (isActive()) {
@@ -19,13 +21,12 @@ function toggle(): void {
   );
   document.getElementById("addNewBurg")?.classList.add("pressed");
 
-  if (!layerIsOn("toggleBurgIcons")) toggleBurgIcons();
-  if (!layerIsOn("toggleLabels")) toggleLabels();
+  Layers.show("burgIcons", "labels");
 }
 
 function addOnClick(event: MouseEvent): void {
   const point = pointer(event, event.currentTarget as SVGGElement);
-  const cell = findCell(point[0], point[1]);
+  const cell = Pack.findCell(point[0], point[1]);
   if (cell === undefined) return;
 
   if (pack.cells.h[cell] < 20) {
@@ -37,8 +38,10 @@ function addOnClick(event: MouseEvent): void {
     return;
   }
 
-  Burgs.add(point);
+  const burgId = Burgs.add(point);
+  redrawEmblem("burg", burgId);
   refreshEditors();
+  Layers.draw("burgIcons", "labels", "routes");
 
   if (!event.shiftKey) stop();
 }

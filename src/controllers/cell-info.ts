@@ -1,14 +1,12 @@
 // The Cell Info panel: everything known about the cell under the cursor
 import { select } from "d3";
+import { destroyDialog } from "@/components/dialog/dialog-helpers";
 import type { Feature } from "@/generators/features";
 import type { Point } from "@/generators/voronoi";
 import {
   convertTemperature,
   debounce,
-  destroyDialogIfExists,
   ensureEl,
-  findClosestCell,
-  findGridCell,
   getArea,
   getAreaUnit,
   getCellPopulation,
@@ -37,7 +35,7 @@ function open(): void {
 
 function cleanup(): void {
   select<SVGGElement, unknown>("#viewbox").on(".cellInfo", null);
-  destroyDialogIfExists("cellInfo");
+  destroyDialog("cellInfo");
 }
 
 function renderDialog(): void {
@@ -74,10 +72,10 @@ const updateCellInfo = debounce((event: MouseEvent | TouchEvent): void => {
   if (!node || !pack.cells?.p) return;
 
   const point = getPointer(event, node);
-  const packCellId = findClosestCell(...point, undefined, pack);
+  const packCellId = Pack.findCell(...point);
   if (packCellId === undefined) return;
 
-  const gridCellId = findGridCell(point[0], point[1], grid);
+  const gridCellId = Grid.findCell(point[0], point[1]);
   updateFields(point, packCellId, gridCellId);
 }, 100);
 
@@ -109,7 +107,7 @@ function updateFields(point: Point, cellId: number, gridCellId: number): void {
   set("infoReligion", getNamedInfo(pack.religions, cells.religion[cellId], "name"));
   set("infoPopulation", getFriendlyPopulation(cellId));
   set("infoBurg", getNamedInfo(pack.burgs, cells.burg[cellId], "name"));
-  set("infoFeature", featureId ? `${feature.group || feature.type} (${featureId})` : "n/a");
+  set("infoFeature", featureId ? `${feature.subtype || feature.type} (${featureId})` : "n/a");
   set("infoBiome", pack.biomes[cells.biome[cellId]].name);
   set("infoGood", getNamedInfo(pack.goods, cells.good[cellId], "name"));
   set("infoMarket", getMarketInfo(cells.market?.[cellId]));
@@ -186,7 +184,7 @@ function getElevation(feature: Feature, h: number): string {
 function getDepth(feature: Feature, [x, y]: Point): string {
   if (feature.land) return `0 ${ensureEl<HTMLSelectElement>("heightUnit").value}`; // land: 0
 
-  const gridH = grid.cells.h[findGridCell(x, y, grid)];
+  const gridH = grid.cells.h[Grid.findCell(x, y)];
   // lake: difference between surface and bottom
   if (feature.type === "lake") return getHeight(gridH === 19 ? feature.height / 2 : gridH, true);
 

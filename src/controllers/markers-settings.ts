@@ -1,26 +1,27 @@
-import { refreshEditors } from "@/components/dialog/dialog-helpers";
+import { destroyDialog, refreshEditors } from "@/components/dialog/dialog-helpers";
+import { Layers } from "@/components/layers";
 import { tip } from "@/components/tooltips";
 import { Controllers } from "@/controllers";
-import { drawMarkers } from "@/renderers/draw-markers";
-import { destroyDialogIfExists, ensureEl } from "@/utils";
+import { ensureEl } from "@/utils";
 
 const DIALOG_ID = "markersSettings";
 
 function open(): void {
   if (customization) return;
-  destroyDialogIfExists(DIALOG_ID);
+  destroyDialog(DIALOG_ID);
   ensureEl("dialogs").insertAdjacentHTML("beforeend", `<div id="${DIALOG_ID}" class="dialog"></div>`);
   drawConfigTable();
 
   $(`#${DIALOG_ID}`).dialog({
     resizable: false,
     title: "Markers generation settings",
+    maxHeight: 600,
     position: { my: "left top", at: "left+10 top+10", of: "svg", collision: "fit" },
     buttons: {
       Regenerate: () => {
         applyChanges();
         Markers.regenerate();
-        if (layerIsOn("toggleMarkers")) drawMarkers();
+        Layers.draw("markers");
         refreshEditors();
         drawConfigTable();
       },
@@ -100,7 +101,7 @@ function drawConfigTable(): void {
 }
 
 function cleanup(): void {
-  destroyDialogIfExists(DIALOG_ID);
+  destroyDialog(DIALOG_ID);
 }
 
 export const MarkersSettings = { open };

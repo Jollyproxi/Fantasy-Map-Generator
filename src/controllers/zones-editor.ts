@@ -1,49 +1,61 @@
-import { drag, select, sum } from "d3";
-import { closeDialogs, confirmationDialog } from "@/components/dialog/dialog-helpers";
+import { select, sum } from "d3";
+import { closeDialogs, confirmationDialog, destroyDialog, updateDialog } from "@/components/dialog/dialog-helpers";
 import { applyLineHighlighting } from "@/components/dialog/highlighting";
+import { dialogState } from "@/components/dialog/state";
+import {
+  type EditorColumn,
+  initColumnVisibility,
+  initEditorTable,
+  renderEditorHeader,
+  renderEditorPagination,
+  type TableView
+} from "@/components/dialog/table";
 import type { FillBoxElement } from "@/components/fill-box";
-import { clearMainTip, showMainTip, tip } from "@/components/tooltips";
-import { applyDefaultViewboxEvents } from "@/components/viewbox-events";
+import { Layers } from "@/components/layers";
+import { tip } from "@/components/tooltips";
 import { Controllers } from "@/controllers";
 import type { Zone } from "@/generators/zones-generator";
 import { clearLegend, drawLegend } from "@/renderers/draw-legend";
-import { moveCircle, removeCircle } from "@/renderers/overlays/brush-circle";
 import { fog, unfog } from "@/renderers/overlays/fogging";
-import { downloadFile, findAllCellsInRadius, getArea, getAreaUnit, getFileName } from "@/utils";
-import { destroyDialogIfExists, ensureEl, getPackPolygon, getPointer, rn, si, unique } from "../utils";
+import { downloadFile, getArea, getAreaUnit, getFileName } from "@/utils";
+import { ensureEl, rn, si, unique } from "../utils";
 
-interface ZoneCellDatum {
-  cell: number;
-  zoneId: number;
-  fill: string;
-}
+const dialogId = "zonesEditor" as const;
+const position = { my: "right top", at: "right-10 top+10", of: "svg", collision: "fit" };
+let filterState: { type: string };
+
+type ZoneRow = { zone: Zone; area: number; rural: number; urban: number; population: number };
+const columns: EditorColumn<ZoneRow>[] = [
+  { key: "description", label: "Description", width: "13em", permanent: true },
+  { key: "type", label: "Type", width: "7em" },
+  { key: "cells", label: "Cells", width: "5em" },
+  { key: "area", label: "Area", width: "7em" },
+  { key: "population", label: "Population", width: "6em" },
+  { key: "actions", width: "4.2em", permanent: true, align: "right" }
+];
+const zonesTable = initEditorTable<ZoneRow>({ getData: getZonesData, onUpdate: renderZonesPage });
 
 function open(): void {
+  filterState = dialogState.get(dialogId, "filters", () => ({ type: "all" }));
   closeDialogs("#zonesEditor, .stable");
-  if (!layerIsOn("toggleZones")) toggleZones();
+  Layers.show("zones");
 
   renderDialog();
   updateFilters();
-  zonesEditorAddLines();
+  zonesTable.reset();
 
   $("#zonesEditor").dialog({
     title: "Zones Editor",
     resizable: false,
     close: closeZonesEditor,
-    position: { my: "right top", at: "right-10 top+10", of: "svg", collision: "fit" }
+    position
   });
 }
 
 function renderDialog(): void {
-  destroyDialogIfExists("zonesEditor");
-  const editorHtml = /* html */ `<div id="zonesEditor" class="dialog stable">
-      <div id="customHeader" class="header" style="grid-template-columns: 13em 7em 6em 5em 9em">
-        <div data-tip="Zone description">Description&nbsp;</div>
-        <div data-tip="Zone type">Type&nbsp;</div>
-        <div data-tip="Zone cells count" class="hide">Cells&nbsp;</div>
-        <div data-tip="Zone area" class="hide">Area&nbsp;</div>
-        <div data-tip="Zone population" class="hide">Population&nbsp;</div>
-      </div>
+  destroyDialog("zonesEditor");
+  const editorHtml = /* html */ `<div id="zonesEditor" class="dialog stable editorDialog">
+      ${renderEditorHeader({ dialogId, columns })}
       <div id="zonesBodySection" class="table" data-type="absolute"></div>
       <div id="zonesFooter" class="totalLine">
         <div data-tip="Number of zones" style="margin-left: 5px">
@@ -71,26 +83,6 @@ function renderDialog(): void {
           class="icon-percent"
         ></button>
         <button id="zonesManually" data-tip="Re-assign zones" class="icon-brush"></button>
-        <div id="zonesManuallyButtons" style="display: none">
-          <div data-tip="Change brush size. Shortcut: + to increase; – to decrease" style="margin-block: 0.3em">
-            Brush size:
-            <slider-input id="zonesBrush" min="1" max="100" value="8"></slider-input>
-          </div>
-          <div>
-            <input id="zonesBrushLandOnly" class="checkbox" type="checkbox" checked />
-            <label for="zonesBrushLandOnly" class="checkbox-label"><i>Change land only</i></label>
-          </div>
-          <div style="margin-top: 0.3em">
-            <button id="zonesManuallyApply" data-tip="Apply assignment" class="icon-check"></button>
-            <button id="zonesManuallyCancel" data-tip="Cancel assignment" class="icon-cancel"></button>
-            <button
-              id="zonesRemove"
-              data-tip="Click to toggle the removal mode on brush dragging"
-              data-shortcut="Ctrl"
-              class="icon-eraser"
-            ></button>
-          </div>
-        </div>
         <button id="zonesAdd" data-tip="Add new zone layer" class="icon-plus"></button>
         <button id="zonesExport" data-tip="Download zones-related data" class="icon-download"></button>
         <div id="zonesFilters" data-tip="Show only zones of selected type" style="display: inline-block">
@@ -100,37 +92,32 @@ function renderDialog(): void {
       </div>
     </div>`;
   ensureEl("dialogs").insertAdjacentHTML("beforeend", editorHtml);
+  initColumnVisibility({
+    dialogId,
+    columns,
+    onUpdate: () => updateDialog(dialogId, { width: "fit-content", position })
+  });
   applyLineHighlighting("zonesEditor", ({ target }) => {
     const zone = target.closest<SVGElement>("#zones [id^='zone']");
     return zone && /^zone\d+$/.test(zone.id) ? Number(zone.id.slice(4)) : undefined;
   });
 
   const body = ensureEl("zonesBodySection");
-  ensureEl("zonesFilterType").on("click", updateFilters);
-  ensureEl("zonesFilterType").on("change", filterZonesByType);
-  ensureEl("zonesEditorRefresh").on("click", zonesEditorAddLines);
-  ensureEl("zonesEditStyle").on("click", () => editStyle("zones"));
-  ensureEl("zonesLegend").on("click", toggleLegend);
-  ensureEl("zonesPercentage").on("click", togglePercentageMode);
-  ensureEl("zonesManually").on("click", enterZonesManualAssignent);
-  ensureEl("zonesManuallyApply").on("click", applyZonesManualAssignent);
-  ensureEl("zonesManuallyCancel").on("click", cancelZonesManualAssignent);
-  ensureEl("zonesAdd").on("click", addZonesLayer);
-  ensureEl("zonesExport").on("click", downloadZonesData);
-  ensureEl("zonesRemove").on("click", (e: Event) => (e.target as HTMLElement).classList.toggle("pressed"));
+  ensureEl("zonesFilterType").addEventListener("click", updateFilters);
+  ensureEl("zonesFilterType").addEventListener("change", filterZonesByType);
+  ensureEl("zonesEditorRefresh").addEventListener("click", zonesTable.refresh);
+  ensureEl("zonesEditStyle").addEventListener("click", () => editStyle("zones"));
+  ensureEl("zonesLegend").addEventListener("click", toggleLegend);
+  ensureEl("zonesPercentage").addEventListener("click", togglePercentageMode);
+  ensureEl("zonesManually").addEventListener("click", openPaintEditor);
+  ensureEl("zonesAdd").addEventListener("click", addZonesLayer);
+  ensureEl("zonesExport").addEventListener("click", downloadZonesData);
 
-  body.on("click", (ev: Event) => {
+  body.addEventListener("click", (ev: Event) => {
     const line = (ev.target as HTMLElement).closest<HTMLElement>("div.states");
     if (!line) return;
     const zone = pack.zones.find(z => z.i === +line.dataset.id!);
     if (!zone) return;
-
-    if (customization) {
-      if (zone.hidden) return;
-      body.querySelector("div.selected")?.classList.remove("selected");
-      line.classList.add("selected");
-      return;
-    }
 
     const target = ev.target as HTMLElement;
     const fillBox = target.closest("fill-box");
@@ -141,7 +128,7 @@ function renderDialog(): void {
     else if (target.classList.contains("zoneFog")) toggleFog(zone, target.classList);
   });
 
-  body.on("input", (ev: Event) => {
+  body.addEventListener("input", (ev: Event) => {
     const target = ev.target as HTMLInputElement;
     const line = target.closest<HTMLElement>("div.states");
     if (!line) return;
@@ -162,7 +149,6 @@ function renderDialog(): void {
 }
 
 function closeZonesEditor(): void {
-  exitZonesManualAssignment("close");
   $("#zonesEditor").dialog("destroy");
   ensureEl("zonesEditor").remove();
 }
@@ -171,74 +157,70 @@ function closeZonesEditor(): void {
 function updateFilters(): void {
   const filterSelect = ensureEl<HTMLSelectElement>("zonesFilterType");
   const types = unique(pack.zones.map(zone => zone.type));
-  const typeToFilterBy = types.includes(filterSelect.value) ? filterSelect.value : "all";
+  if (!types.includes(filterState.type)) filterState.type = "all";
 
   filterSelect.innerHTML = `<option value='all'>all</option>${types
     .map(type => `<option value="${type}">${type}</option>`)
     .join("")}`;
-  filterSelect.value = typeToFilterBy;
+  filterSelect.value = filterState.type;
+  dialogState.set(dialogId, "filters", filterState);
 }
 
 // add line for each zone
-function zonesEditorAddLines(): void {
-  const body = ensureEl("zonesBodySection");
-  const typeToFilterBy = ensureEl<HTMLSelectElement>("zonesFilterType").value;
-  const filteredZones = typeToFilterBy === "all" ? pack.zones : pack.zones.filter(zone => zone.type === typeToFilterBy);
-
-  const lines = filteredZones.map(({ i, name, type, cells, color, hidden }) => {
-    const area = getArea(sum(cells.map(c => pack.cells.area[c])));
-    const rural = sum(cells.map(c => pack.cells.pop[c])) * populationRate;
+function getZonesData(): ZoneRow[] {
+  const zones = filterState.type === "all" ? pack.zones : pack.zones.filter(zone => zone.type === filterState.type);
+  return zones.map(zone => {
+    const area = getArea(sum(zone.cells.map(cell => pack.cells.area[cell])));
+    const rural = sum(zone.cells.map(cell => pack.cells.pop[cell])) * populationRate;
     const urban =
-      sum(cells.map(c => pack.cells.burg[c]).map(b => pack.burgs[b]?.population ?? 0)) * populationRate * urbanization;
-    const population = rn(rural + urban);
+      sum(zone.cells.map(cell => pack.cells.burg[cell]).map(burg => pack.burgs[burg]?.population ?? 0)) *
+      populationRate *
+      urbanization;
+    return { zone, area, rural, urban, population: rn(rural + urban) };
+  });
+}
+
+function renderZonesPage(view: TableView<ZoneRow>): void {
+  const body = ensureEl("zonesBodySection");
+  const totalArea = getArea(graphWidth * graphHeight);
+  const totalPopulation =
+    (sum(pack.cells.pop) + sum(pack.burgs.filter(b => !b.removed).map(b => b.population ?? 0)) * urbanization) *
+    populationRate;
+  const percentage = body.dataset.type === "percentage";
+  const lines = view.rows.map(({ zone: { i, name, type, cells, color, hidden }, area, rural, urban, population }) => {
     const populationTip = `Total population: ${si(population)}; Rural population: ${si(rural)}; Urban population: ${si(urban)}. Click to change`;
     const focused = select<SVGElement, unknown>("#deftemp").select(`#fog #focusZone${i}`).size();
 
-    return /* html */ `<div class="states" data-id="${i}" data-color="${color}" data-description="${name}"
-      data-type="${type}" data-cells=${cells.length} data-area=${area} data-population=${population} style="${hidden ? "opacity: 0.5" : ""}">
-      <fill-box fill="${color}"></fill-box>
-      <input data-tip="Zone description. Click and type to change" style="width: 11em" class="zoneName" value="${name}" autocorrect="off" spellcheck="false">
-      <input data-tip="Zone type. Click and type to change" class="zoneType" value="${type}">
-      <span data-tip="Cells count" class="icon-check-empty hide"></span>
-      <div data-tip="Cells count" class="stateCells hide">${cells.length}</div>
-      <span data-tip="Zone area" style="padding-right:4px" class="icon-map-o hide"></span>
-      <div data-tip="Zone area" class="biomeArea hide">${`${si(area)} ${getAreaUnit()}`}</div>
-      <span data-tip="${populationTip}" class="icon-male hide"></span>
-      <div data-tip="${populationTip}" class="zonePopulation hide pointer">${si(population)}</div>
-      <span data-tip="Drag to raise or lower the zone" class="icon-resize-vertical hide"></span>
-      <span data-tip="Toggle zone focus" class="zoneFog icon-pin ${focused ? "" : "inactive"} hide ${cells.length ? "" : "placeholder"}"></span>
-      <span data-tip="Toggle zone visibility" class="zoneHide icon-eye hide ${cells.length ? "" : " placeholder"}"></span>
-      <span data-tip="Remove zone" class="zoneRemove icon-trash-empty hide"></span>
+    return /* html */ `<div class="states" data-id="${i}" style="${hidden ? "opacity: 0.5" : ""}">
+      <div data-col="description" style="display:flex; align-items:center"><fill-box fill="${color}"></fill-box><input data-tip="Zone description. Click and type to change" style="width: 11em" class="zoneName" value="${name}" autocorrect="off" spellcheck="false"></div>
+      <div data-col="type"><input data-tip="Zone type. Click and type to change" class="zoneType" value="${type}"></div>
+      <div data-col="cells"><span data-tip="Cells count" class="icon-check-empty"></span><span data-tip="Cells count" class="stateCells">${percentage ? `${rn((cells.length / pack.cells.i.length) * 100, 2)}%` : cells.length}</span></div>
+      <div data-col="area"><span data-tip="Zone area" class="icon-map-o" style="padding-right: 2px"></span><span data-tip="Zone area" class="biomeArea">${percentage ? `${rn((area / totalArea) * 100, 2)}%` : `${si(area)} ${getAreaUnit()}`}</span></div>
+      <div data-col="population"><span data-tip="${populationTip}" class="icon-male"></span><span data-tip="${populationTip}" class="zonePopulation pointer">${percentage ? `${rn((population / totalPopulation) * 100, 2)}%` : si(population)}</span></div>
+      <div data-col="actions"><span data-tip="Drag to raise or lower the zone" class="icon-resize-vertical"></span><span data-tip="Toggle zone focus" class="zoneFog icon-pin ${focused ? "" : "inactive"} ${cells.length ? "" : "placeholder"}"></span><span data-tip="Toggle zone visibility" class="zoneHide icon-eye ${cells.length ? "" : " placeholder"}"></span><span data-tip="Remove zone" class="zoneRemove icon-trash-empty"></span></div>
     </div>`;
   });
 
   body.innerHTML = lines.join("");
 
   // update footer
-  const totalArea = getArea(graphWidth * graphHeight);
   const footerArea = ensureEl("zonesFooterArea");
   footerArea.dataset.area = String(totalArea);
-  const totalPop =
-    (sum(pack.cells.pop) + sum(pack.burgs.filter(b => !b.removed).map(b => b.population ?? 0)) * urbanization) *
-    populationRate;
-  ensureEl("zonesFooterPopulation").dataset.population = String(totalPop);
-  ensureEl("zonesFooterNumber").innerHTML = `${filteredZones.length} of ${pack.zones.length}`;
+  ensureEl("zonesFooterPopulation").dataset.population = String(totalPopulation);
+  ensureEl("zonesFooterNumber").innerHTML = `${view.all.length} of ${pack.zones.length}`;
   ensureEl("zonesFooterCells").innerHTML = String(pack.cells.i.length);
   footerArea.innerHTML = `${si(totalArea)} ${getAreaUnit()}`;
-  ensureEl("zonesFooterPopulation").innerHTML = si(totalPop);
+  ensureEl("zonesFooterPopulation").innerHTML = si(totalPopulation);
+  renderEditorPagination(ensureEl("zonesFooter"), view, zonesTable.goto);
 
   body.querySelectorAll("div.states").forEach(el => {
-    el.on("mouseenter", zoneHighlightOn);
+    el.addEventListener("mouseenter", zoneHighlightOn);
   });
   body.querySelectorAll("div.states").forEach(el => {
-    el.on("mouseleave", zoneHighlightOff);
+    el.addEventListener("mouseleave", zoneHighlightOff);
   });
 
-  if (body.dataset.type === "percentage") {
-    body.dataset.type = "absolute";
-    togglePercentageMode();
-  }
-  $("#zonesEditor").dialog({ width: "fit-content" });
+  updateDialog(dialogId, { width: "fit-content", position });
 }
 
 function zoneHighlightOn(this: HTMLElement): void {
@@ -252,181 +234,68 @@ function zoneHighlightOff(this: HTMLElement): void {
 }
 
 function filterZonesByType(): void {
-  drawZones();
-  zonesEditorAddLines();
+  filterState.type = ensureEl<HTMLSelectElement>("zonesFilterType").value;
+  dialogState.set(dialogId, "filters", filterState);
+  Layers.draw("zones");
+  zonesTable.reset();
 }
 
 function movezone(_ev: unknown, ui: { item: ArrayLike<HTMLElement> & { index(): number } }): void {
   const zone = pack.zones.find(z => z.i === +ui.item[0].dataset.id!);
   if (!zone) return;
-  const oldIndex = pack.zones.indexOf(zone);
-  const newIndex = ui.item.index();
-  if (oldIndex === newIndex) return;
-
-  pack.zones.splice(oldIndex, 1);
+  const nextId =
+    ui.item[0].nextElementSibling instanceof HTMLElement ? +ui.item[0].nextElementSibling.dataset.id! : null;
+  const previousId =
+    ui.item[0].previousElementSibling instanceof HTMLElement ? +ui.item[0].previousElementSibling.dataset.id! : null;
+  pack.zones.splice(pack.zones.indexOf(zone), 1);
+  const nextIndex = nextId === null ? -1 : pack.zones.findIndex(item => item.i === nextId);
+  const previousIndex = previousId === null ? -1 : pack.zones.findIndex(item => item.i === previousId);
+  const newIndex = nextIndex >= 0 ? nextIndex : previousIndex >= 0 ? previousIndex + 1 : pack.zones.length;
   pack.zones.splice(newIndex, 0, zone);
-  drawZones();
+  Layers.draw("zones");
 }
 
-function enterZonesManualAssignent(): void {
-  if (!layerIsOn("toggleZones")) toggleZones();
-  customization = 10;
-  const body = ensureEl("zonesBodySection");
+function openPaintEditor(): void {
+  Layers.show("zones");
 
-  document.querySelectorAll<HTMLElement>("#zonesBottom > *").forEach(el => {
-    el.style.display = "none";
-  });
-  ensureEl("zonesManuallyButtons").style.display = "inline-block";
-  ensureEl("zonesEditor")
-    .querySelectorAll(".hide")
-    .forEach(el => {
-      el.classList.add("hidden");
-    });
-  ensureEl("zonesFooter").style.display = "none";
-  body.querySelectorAll<HTMLElement>("div > input, select, svg").forEach(e => {
-    e.style.pointerEvents = "none";
-  });
-  $("#zonesEditor").dialog({ position: { my: "right top", at: "right-10 top+10", of: "svg", collision: "fit" } });
+  const visibleZones = getZonesData()
+    .map(row => row.zone)
+    .filter(zone => !zone.hidden);
 
-  tip("Click to select a zone, drag to paint a zone", true);
-  select<SVGElement, unknown>("#viewbox")
-    .style("cursor", "crosshair")
-    .on("click", selectZoneOnMapClick)
-    .call(drag<SVGElement, unknown>().on("start", dragZoneBrush))
-    .on("touchmove mousemove", moveZoneBrush);
-
-  body.querySelector("div")?.classList.add("selected");
-
-  // draw zones as individual cells
-  select<SVGGElement, unknown>("#zones").selectAll("*").remove();
-
-  const filterBy = ensureEl<HTMLSelectElement>("zonesFilterType").value;
-  const isFiltered = filterBy && filterBy !== "all";
-  const visibleZones = pack.zones.filter(zone => !zone.hidden && (!isFiltered || zone.type === filterBy));
-  const data = visibleZones.flatMap(({ i, cells, color }) => cells.map(cell => ({ cell, zoneId: i, fill: color })));
-  select<SVGGElement, unknown>("#zones")
-    .selectAll<SVGPolygonElement, ZoneCellDatum>("polygon")
-    .data(data, d => `${d.zoneId}-${d.cell}`)
-    .enter()
-    .append("polygon")
-    .attr("points", d => getPackPolygon(d.cell, pack))
-    .attr("fill", d => d.fill)
-    .attr("data-zone", d => d.zoneId)
-    .attr("data-cell", d => d.cell);
-}
-
-function selectZoneOnMapClick(event: any): void {
-  const target = event.target as HTMLElement;
-  if ((target.parentElement as HTMLElement).id !== "zones") return;
-  const zoneId = target.dataset.zone;
-  const el = ensureEl("zonesBodySection").querySelector(`div[data-id='${zoneId}']`);
-
-  ensureEl("zonesBodySection").querySelector("div.selected")?.classList.remove("selected");
-  el?.classList.add("selected");
-}
-
-function dragZoneBrush(this: SVGElement, event: any): void {
-  const radius = +ensureEl<HTMLInputElement>("zonesBrush").value;
-  const eraseMode = ensureEl("zonesRemove").classList.contains("pressed");
-  const landOnly = ensureEl<HTMLInputElement>("zonesBrushLandOnly").checked;
-
-  event.on("drag", (dragEvent: any) => {
-    if (!dragEvent.dx && !dragEvent.dy) return;
-    const [x, y] = getPointer(dragEvent, this);
-    moveCircle(x, y, radius);
-
-    let selection = radius > 5 ? findAllCellsInRadius(x, y, radius, pack) : [findCell(x, y)!];
-    if (landOnly) selection = selection.filter(i => pack.cells.h[i] >= 20);
-    if (!selection.length) return;
-
-    const zoneId = +ensureEl("zonesBodySection").querySelector<HTMLElement>("div.selected")!.dataset.id!;
-    const zone = pack.zones.find(z => z.i === zoneId);
-    if (!zone) return;
-
-    if (eraseMode) {
-      const data = select<SVGGElement, unknown>("#zones")
-        .selectAll<SVGPolygonElement, ZoneCellDatum>("polygon")
-        .data()
-        .filter(d => !(d.zoneId === zoneId && selection.includes(d.cell)));
-      select<SVGGElement, unknown>("#zones")
-        .selectAll<SVGPolygonElement, ZoneCellDatum>("polygon")
-        .data(data, d => `${d.zoneId}-${d.cell}`)
-        .exit()
-        .remove();
-    } else {
-      const data: ZoneCellDatum[] = selection.map(cell => ({ cell, zoneId, fill: zone.color }));
-      select<SVGGElement, unknown>("#zones")
-        .selectAll<SVGPolygonElement, ZoneCellDatum>("polygon")
-        .data(data, d => `${d.zoneId}-${d.cell}`)
-        .enter()
-        .append("polygon")
-        .attr("points", d => getPackPolygon(d.cell, pack))
-        .attr("fill", d => d.fill)
-        .attr("data-zone", d => d.zoneId)
-        .attr("data-cell", d => d.cell);
+  const zonesByCell = new Map<number, number[]>();
+  for (const zone of visibleZones) {
+    for (const cell of zone.cells) {
+      const zoneIds = zonesByCell.get(cell);
+      if (zoneIds) zoneIds.push(zone.i);
+      else zonesByCell.set(cell, [zone.i]);
     }
+  }
+
+  void Controllers.PaintEditor.open({
+    title: "Paint Zones",
+    parentDialogId: dialogId,
+    onClose: open,
+    mode: "multiple",
+    items: [
+      { id: -1, name: "No zone", color: "#ffffff" },
+      ...visibleZones.map(zone => ({ id: zone.i, name: zone.name, color: zone.color }))
+    ],
+    landOnlyControl: true,
+    getValue: cell => zonesByCell.get(cell) ?? [],
+    onApply: changes => applyZonePaint(visibleZones, changes)
   });
 }
 
-function moveZoneBrush(this: SVGElement, event: any): void {
-  showMainTip();
-  const [x, y] = getPointer(event, this);
-  const radius = +ensureEl<HTMLInputElement>("zonesBrush").value;
-  moveCircle(x, y, radius);
-}
+function applyZonePaint(zones: readonly Zone[], changes: ReadonlyMap<number, readonly number[]>): void {
+  const cellsByZone = new Map(zones.map(zone => [zone.i, new Set(zone.cells)]));
+  for (const [cell, zoneIds] of changes) {
+    for (const cells of cellsByZone.values()) cells.delete(cell);
+    for (const zoneId of zoneIds) cellsByZone.get(zoneId)?.add(cell);
+  }
+  for (const zone of zones) zone.cells = [...cellsByZone.get(zone.i)!];
 
-function applyZonesManualAssignent(): void {
-  const data = select<SVGGElement, unknown>("#zones").selectAll<SVGPolygonElement, ZoneCellDatum>("polygon").data();
-  const zoneCells = data.reduce<Record<number, number[]>>((acc, d) => {
-    if (!acc[d.zoneId]) acc[d.zoneId] = [];
-    acc[d.zoneId].push(d.cell);
-    return acc;
-  }, {});
-
-  const filterBy = ensureEl<HTMLSelectElement>("zonesFilterType").value;
-  const isFiltered = filterBy && filterBy !== "all";
-  const visibleZones = pack.zones.filter(zone => !zone.hidden && (!isFiltered || zone.type === filterBy));
-  visibleZones.forEach(zone => {
-    zone.cells = zoneCells[zone.i] || [];
-  });
-
-  drawZones();
-  zonesEditorAddLines();
-  exitZonesManualAssignment();
-}
-
-function cancelZonesManualAssignent(): void {
-  drawZones();
-  exitZonesManualAssignment();
-}
-
-function exitZonesManualAssignment(close?: string): void {
-  customization = 0;
-  removeCircle();
-  document.querySelectorAll<HTMLElement>("#zonesBottom > *").forEach(el => {
-    el.style.display = "inline-block";
-  });
-  ensureEl("zonesManuallyButtons").style.display = "none";
-
-  ensureEl("zonesEditor")
-    .querySelectorAll(".hide:not(.show)")
-    .forEach(el => {
-      el.classList.remove("hidden");
-    });
-  ensureEl("zonesFooter").style.display = "block";
-  ensureEl("zonesBodySection")
-    .querySelectorAll<HTMLElement>("div > input, select, svg")
-    .forEach(e => {
-      e.style.removeProperty("pointer-events");
-    });
-  if (!close)
-    $("#zonesEditor").dialog({ position: { my: "right top", at: "right-10 top+10", of: "svg", collision: "fit" } });
-
-  applyDefaultViewboxEvents();
-  clearMainTip();
-
-  const selected = ensureEl("zonesBodySection").querySelector("div.selected");
-  if (selected) selected.classList.remove("selected");
+  Layers.draw("zones");
+  if (document.getElementById(dialogId)) zonesTable.refresh();
 }
 
 function changeFill(fillBox: FillBoxElement, zone: Zone): void {
@@ -435,7 +304,7 @@ function changeFill(fillBox: FillBoxElement, zone: Zone): void {
   const callback = (newFill: string): void => {
     fillBox.fill = newFill;
     zone.color = newFill;
-    drawZones();
+    Layers.draw("zones");
   };
 
   void Controllers.ColorPicker.open(currentFill, callback);
@@ -445,8 +314,8 @@ function toggleVisibility(zone: Zone): void {
   if (zone.hidden) delete zone.hidden;
   else zone.hidden = true;
 
-  drawZones();
-  zonesEditorAddLines();
+  Layers.draw("zones");
+  zonesTable.refresh();
 }
 
 function toggleFog(zone: Zone, cl: DOMTokenList): void {
@@ -467,7 +336,7 @@ function toggleLegend(): void {
     return;
   } // hide legend
 
-  const filterBy = ensureEl<HTMLSelectElement>("zonesFilterType").value;
+  const filterBy = filterState.type;
   const isFiltered = filterBy && filterBy !== "all";
   const visibleZones = pack.zones.filter(zone => !zone.hidden && (!isFiltered || zone.type === filterBy));
   const data = visibleZones.map(({ i, name, color }) => [`zone${i}`, color, name]);
@@ -476,21 +345,8 @@ function toggleLegend(): void {
 
 function togglePercentageMode(): void {
   const body = ensureEl("zonesBodySection");
-  if (body.dataset.type === "absolute") {
-    body.dataset.type = "percentage";
-    const totalCells = +ensureEl("zonesFooterCells").innerHTML;
-    const totalArea = +ensureEl("zonesFooterArea").dataset.area!;
-    const totalPopulation = +ensureEl("zonesFooterPopulation").dataset.population!;
-
-    body.querySelectorAll<HTMLElement>(":scope > div").forEach(el => {
-      el.querySelector(".stateCells")!.innerHTML = `${rn((+el.dataset.cells! / totalCells) * 100, 2)}%`;
-      el.querySelector(".biomeArea")!.innerHTML = `${rn((+el.dataset.area! / totalArea) * 100, 2)}%`;
-      el.querySelector(".zonePopulation")!.innerHTML = `${rn((+el.dataset.population! / totalPopulation) * 100, 2)}%`;
-    });
-  } else {
-    body.dataset.type = "absolute";
-    zonesEditorAddLines();
-  }
+  body.dataset.type = body.dataset.type === "absolute" ? "percentage" : "absolute";
+  zonesTable.refresh();
 }
 
 function addZonesLayer(): void {
@@ -500,25 +356,17 @@ function addZonesLayer(): void {
   const color = `url(#hatch${zoneId % 42})`;
   pack.zones.push({ i: zoneId, name, type, color, cells: [] });
 
-  zonesEditorAddLines();
-  drawZones();
+  zonesTable.refresh();
+  Layers.draw("zones");
 }
 
 function downloadZonesData(): void {
   const unit = areaUnit.value === "square" ? `${distanceUnitInput.value}2` : areaUnit.value;
   let data = `Id,Color,Description,Type,Cells,Area ${unit},Population\n`; // headers
 
-  ensureEl("zonesBodySection")
-    .querySelectorAll<HTMLElement>(":scope > div")
-    .forEach(el => {
-      data += `${el.dataset.id},`;
-      data += `${el.dataset.color},`;
-      data += `${el.dataset.description},`;
-      data += `${el.dataset.type},`;
-      data += `${el.dataset.cells},`;
-      data += `${el.dataset.area},`;
-      data += `${el.dataset.population}\n`;
-    });
+  for (const { zone, area, population } of getZonesData()) {
+    data += `${zone.i},${zone.color},${zone.name},${zone.type},${zone.cells.length},${area},${population}\n`;
+  }
 
   const name = `${getFileName("Zones")}.csv`;
   downloadFile(data, name);
@@ -611,8 +459,8 @@ function changePopulation(zone: Zone): void {
       });
     }
 
-    if (layerIsOn("togglePopulation")) drawPopulation();
-    zonesEditorAddLines();
+    Layers.draw("population");
+    zonesTable.refresh();
   }
 }
 
@@ -625,7 +473,7 @@ function zoneRemove(zone: Zone): void {
       pack.zones = pack.zones.filter(z => z.i !== zone.i);
       select<SVGGElement, unknown>("#zones").select(`#zone${zone.i}`).remove();
       unfog(`focusZone${zone.i}`);
-      zonesEditorAddLines();
+      zonesTable.refresh();
     }
   });
 }

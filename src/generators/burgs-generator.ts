@@ -1,8 +1,12 @@
-import { select } from "d3";
 import { quadtree } from "d3-quadtree";
-import { each, ensureEl, findClosestCell, gauss, minmax, normalize, P, rn } from "../utils";
+import { Emblems } from "@/generators/emblems-generator";
+import type { BurgGroup } from "@/types/burg-groups";
+import type { Emblem } from "@/types/emblems";
+import { each, ensureEl, gauss, minmax, normalize, P, rn } from "../utils";
 import { type CultureType, DEFAULT_CULTURE_TYPE } from "./cultures-generator";
 import { NON_NAVIGABLE_LAKE_GROUPS } from "./features";
+import type { Label } from "./labels-generator";
+import { Population } from "./population-generator";
 import type { ProductionRecord } from "./production-generator";
 import type { River } from "./river-generator";
 import type { Point } from "./voronoi";
@@ -22,7 +26,7 @@ export interface Burg {
   removed?: boolean;
   population?: number;
   type?: CultureType;
-  coa?: any;
+  coa?: Emblem;
   citadel?: number;
   plaza?: number;
   walls?: number;
@@ -35,6 +39,7 @@ export interface Burg {
   product?: number; // gross product from the last production run
   treasury?: number; // accumulated cash balance
   market?: number;
+  label?: Label;
 }
 
 // A burg that could become a port on a given water body.
@@ -48,7 +53,6 @@ type PortCandidate = {
 
 class BurgModule {
   generate() {
-    TIME && console.time("generateBurgs");
     const { cells } = pack;
 
     let burgs: Burg[] = [0 as any]; // burgs array
@@ -146,8 +150,6 @@ class BurgModule {
 
     pack.burgs = burgs;
     this.assignPorts();
-
-    TIME && console.timeEnd("generateBurgs");
 
     function getCapitalsNumber() {
       let number = (ensureEl("statesNumber") as HTMLInputElement).valueAsNumber;
@@ -379,8 +381,8 @@ class BurgModule {
     if (burg.culture !== state.culture) kinship -= 0.25;
 
     const type = burg.capital && P(0.2) ? "Capital" : burg.type === "Generic" ? "City" : burg.type;
-    burg.coa = COA.generate(stateCOA, kinship, null, type);
-    burg.coa.shield = COA.getShield(burg.culture!, burg.state!);
+    burg.coa = Emblems.generate(stateCOA, kinship, null, type);
+    burg.coa.shield = Emblems.getShield(burg.culture!, burg.state!);
   }
 
   private defineFeatures(burg: Burg) {
@@ -395,7 +397,7 @@ class BurgModule {
     );
   }
 
-  getDefaultGroups() {
+  getDefaultGroups(): BurgGroup[] {
     return [
       {
         name: "capital",
@@ -475,12 +477,13 @@ class BurgModule {
       if (group) return;
     }
 
-    const defaultGroup = options.burgs.groups.find((g: any) => g.isDefault);
+    const defaultGroup = options.burgs.groups.find(g => g.isDefault);
     if (!defaultGroup) {
       ERROR && console.error("No default group defined");
       return;
     }
     burg.group = defaultGroup.name;
+    if (burg.label?.group) delete burg.label.group;
 
     for (const group of options.burgs.groups) {
       if (!group.active) continue;
@@ -519,8 +522,6 @@ class BurgModule {
   }
 
   specify() {
-    TIME && console.time("specifyBurgs");
-
     pack.burgs.forEach(burg => {
       if (!burg.i || burg.removed || burg.lock) return;
       this.definePopulation(burg);
@@ -537,8 +538,6 @@ class BurgModule {
       if (!burg.i || burg.removed) return;
       this.defineGroup(burg, populations);
     });
-
-    TIME && console.timeEnd("specifyBurgs");
   }
 
   private createWatabouCityLinks(burg: Burg) {
@@ -708,7 +707,7 @@ class BurgModule {
     const { cells } = pack;
 
     const burgId = pack.burgs.length;
-    const cellId = findClosestCell(x, y, undefined, pack);
+    const cellId = Pack.findCell(x, y);
     const culture = cells.culture[cellId as number];
     const name = Names.getCulture(culture);
     const state = cells.state[cellId as number];
@@ -728,7 +727,6 @@ class BurgModule {
     };
     this.definePopulation(burg);
     this.defineEmblem(burg);
-    COArenderer.add("burg", burgId, burg.coa, x, y);
     this.defineFeatures(burg);
 
     const populations = pack.burgs
@@ -740,18 +738,13 @@ class BurgModule {
     pack.burgs.push(burg);
     cells.burg[cellId as number] = burgId;
 
-    const newRoute = Routes.connect(cellId as number);
-    if (newRoute && layerIsOn("toggleRoutes")) drawRoute(newRoute);
-
-    window.drawBurgIcon(burg);
-    window.drawBurgLabel(burg);
-
+    Routes.connect(cellId as number);
     return burgId;
   }
 
   regenerate(): void {
     const { cells, burgs, states, provinces } = pack;
-    rankCells();
+    Population.rankCells();
 
     notes = notes.filter(note => {
       if (!note.id.startsWith("burg")) return true;
@@ -851,25 +844,20 @@ class BurgModule {
         const burg = pack.burgs[burgId];
         burg.state = state.i;
         burg.capital = 1;
-        this.changeGroup(burg, null, false);
+        this.changeGroup(burg, null);
       });
 
     this.specify();
     Routes.regenerate();
   }
 
-  changeGroup(burg: Burg, group: string | null = null, render = true) {
+  changeGroup(burg: Burg, group: string | null = null) {
     if (group) {
       burg.group = group;
     } else {
       const validBurgs = pack.burgs.filter(b => b.i && !b.removed);
       const populations = validBurgs.map(b => b.population as number).sort((a, b) => a - b);
       this.defineGroup(burg, populations);
-    }
-
-    if (render) {
-      window.drawBurgIcon(burg);
-      window.drawBurgLabel(burg);
     }
   }
 
@@ -884,13 +872,8 @@ class BurgModule {
     if (noteId !== -1) notes.splice(noteId, 1);
 
     if (burg.coa) {
-      document.getElementById(`burgCOA${burgId}`)?.remove();
-      select("#emblems").select(`#burgEmblems > use[data-i='${burgId}']`).remove();
       delete burg.coa;
     }
-
-    window.removeBurgIcon(burg.i!);
-    window.removeBurgLabel(burg.i!);
   }
 }
 

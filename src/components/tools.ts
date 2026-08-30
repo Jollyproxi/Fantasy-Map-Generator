@@ -1,20 +1,10 @@
 import { refreshEditors } from "@/components/dialog/dialog-helpers";
+import { Layers } from "@/components/layers";
 import { tip } from "@/components/tooltips";
 import { Controllers } from "@/controllers";
+import { Emblems } from "@/generators/emblems-generator";
 import { Population } from "@/generators/population-generator";
-import { drawBorders } from "@/renderers/draw-borders";
-import { drawBurgIcons } from "@/renderers/draw-burg-icons";
-import { drawBurgLabels } from "@/renderers/draw-burg-labels";
-import { clearEmblems, drawEmblems } from "@/renderers/draw-emblems";
-import { drawGoods } from "@/renderers/draw-goods";
-import { drawIce } from "@/renderers/draw-ice";
-import { drawMarkers } from "@/renderers/draw-markers";
-import { drawMarkets } from "@/renderers/draw-markets";
-import { drawMilitary } from "@/renderers/draw-military";
-import { drawReliefIcons } from "@/renderers/draw-relief-icons";
-import { redrawStateLabels } from "@/renderers/draw-state-labels";
 import { unfog } from "@/renderers/overlays/fogging";
-import { tradeAnimation } from "@/renderers/trade-animation";
 import { ensureEl, gauss, isCtrlClick } from "@/utils";
 
 ensureEl("toolsContent").addEventListener("click", event => {
@@ -46,6 +36,7 @@ ensureEl("toolsContent").addEventListener("click", event => {
   else if (buttonId === "overviewRoutesButton") void Controllers.RoutesOverview.open();
   else if (buttonId === "overviewRiversButton") void Controllers.RiversOverview.open();
   else if (buttonId === "overviewMilitaryButton") void Controllers.MilitaryOverview.open();
+  else if (buttonId === "overviewLabelsButton") void Controllers.LabelsOverview.open();
   else if (buttonId === "overviewMarkersButton") void Controllers.MarkersOverview.open();
   else if (buttonId === "overviewMarketsButton") void Controllers.MarketsOverview.open();
   else if (buttonId === "overviewCellsButton") void Controllers.CellInfo.open();
@@ -118,27 +109,31 @@ function regenerate(event: MouseEvent, button: string): void {
 }
 
 function regenerateStateLabels(): void {
-  if (layerIsOn("toggleLabels")) redrawStateLabels();
+  for (const state of pack.states) {
+    if (!state.i || state.removed) continue;
+    if (state.label) delete state.label; // cleanup custom label data to force recalculation of pathPoints
+  }
+  Layers.draw("labels");
 }
 
 function regenerateReliefIcons(): void {
-  if (layerIsOn("toggleRelief")) drawReliefIcons();
+  Relief.generate();
+  Layers.draw("relief");
 }
 
 function regenerateRoutes(): void {
   Routes.regenerate();
-  if (layerIsOn("toggleRoutes")) drawRoutes();
+  Layers.draw("routes");
 }
 
 function regenerateRivers(): void {
   Rivers.regenerate();
-  if (layerIsOn("toggleRivers")) drawRivers();
+  Layers.draw("rivers");
 }
 
 function regeneratePopulation(): void {
   Population.regenerate();
-  if (layerIsOn("togglePopulation")) drawPopulation();
-  if (layerIsOn("toggleGoods")) drawGoods();
+  Layers.draw("population", "goods");
 }
 
 function regenerateStates(): void {
@@ -147,111 +142,75 @@ function regenerateStates(): void {
   if (warning) tip(warning, false, "warn");
 
   unfog();
-  if (layerIsOn("toggleStates")) drawStates();
-  if (layerIsOn("toggleBorders")) drawBorders();
-  if (layerIsOn("toggleProvinces")) drawProvinces();
-  if (layerIsOn("toggleLabels")) {
-    redrawStateLabels();
-    drawBurgLabels();
-  }
-  if (layerIsOn("toggleBurgIcons")) drawBurgIcons();
-  if (layerIsOn("toggleMilitary")) drawMilitary();
-  if (layerIsOn("toggleGoods")) drawGoods();
-  if (layerIsOn("toggleEmblems")) {
-    clearEmblems(["state", "province"]);
-    drawEmblems();
-  }
+  Layers.draw("states", "borders", "provinces", "labels", "burgIcons", "military", "goods", "emblems");
 }
 
 function regenerateProvinces(): void {
   Provinces.regenerate();
   unfog();
-  if (layerIsOn("toggleBorders")) drawBorders();
-  if (layerIsOn("toggleProvinces")) drawProvinces();
-  if (layerIsOn("toggleEmblems")) {
-    clearEmblems(["province"]);
-    drawEmblems();
-  }
+  Layers.draw("borders", "provinces", "labels", "emblems");
 }
 
 function regenerateBurgs(): void {
   Burgs.regenerate();
-  if (layerIsOn("toggleBurgIcons")) drawBurgIcons();
-  if (layerIsOn("toggleLabels")) drawBurgLabels();
-  if (layerIsOn("toggleRoutes")) drawRoutes();
-  if (layerIsOn("togglePopulation")) drawPopulation();
-  if (layerIsOn("toggleGoods")) drawGoods();
-  if (layerIsOn("toggleEmblems")) {
-    clearEmblems(["burg"]);
-    drawEmblems();
-  }
+  Layers.draw("burgIcons", "labels", "routes", "population", "goods", "emblems");
 }
 
 function regenerateGoods(): void {
   Goods.regenerate();
-  if (layerIsOn("toggleGoods")) drawGoods();
+  Layers.draw("goods");
 }
 
 function regenerateMarkets(): void {
   Markets.regenerate();
-  if (layerIsOn("toggleMarketsLayer")) drawMarkets();
-  if (layerIsOn("toggleGoods")) drawGoods();
-  if (layerIsOn("toggleTrade")) tradeAnimation.restart();
+  Layers.draw("markets", "goods", "trade");
 }
 
 function regenerateEconomy(): void {
   Production.regenerateEconomy();
-  if (layerIsOn("toggleMarketsLayer")) drawMarkets();
-  if (layerIsOn("toggleGoods")) drawGoods();
-  if (layerIsOn("toggleTrade")) tradeAnimation.restart();
+  Layers.draw("markets", "goods", "trade");
 }
 
 function regenerateProduction(): void {
   Production.regenerate();
-  if (layerIsOn("toggleGoods")) drawGoods();
-  if (layerIsOn("toggleTrade")) tradeAnimation.restart();
+  Layers.draw("goods", "trade");
 }
 
 function regenerateEmblems(): void {
-  COA.regenerate();
-  if (!layerIsOn("toggleEmblems")) return;
-  clearEmblems(["state", "province", "burg"]);
-  drawEmblems();
+  Emblems.regenerate();
+  Layers.draw("emblems");
 }
 
 function regenerateReligions(): void {
   Religions.regenerate();
-  if (layerIsOn("toggleReligions")) drawReligions();
-  if (layerIsOn("toggleGoods")) drawGoods();
+  Layers.draw("religions", "goods");
 }
 
 function regenerateCultures(): void {
   Cultures.regenerate();
-  if (layerIsOn("toggleCultures")) drawCultures();
-  if (layerIsOn("toggleGoods")) drawGoods();
+  Layers.draw("cultures", "goods");
 }
 
 function regenerateMilitary(): void {
   Military.regenerate();
-  if (layerIsOn("toggleMilitary")) drawMilitary();
+  Layers.draw("military");
 }
 
 function regenerateIce(): void {
   Ice.regenerate();
-  if (layerIsOn("toggleIce")) drawIce();
+  Layers.draw("ice");
 }
 
 function regenerateMarkers(): void {
   Markers.regenerate();
-  if (layerIsOn("toggleMarkers")) drawMarkers();
+  Layers.draw("markers");
 }
 
 function regenerateZones(event: MouseEvent): void {
   function applyZonesRegeneration(multiplier: number): void {
     Zones.regenerate(multiplier);
     refreshEditors();
-    if (layerIsOn("toggleZones")) drawZones();
-    if (layerIsOn("toggleGoods")) drawGoods();
+    Layers.draw("zones", "goods");
   }
 
   if (!isCtrlClick(event)) {

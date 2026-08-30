@@ -1,3 +1,4 @@
+import type { AddedLabel } from "@/generators/added-labels";
 import type { Biome } from "@/generators/biomes-generator";
 import type { Burg } from "@/generators/burgs-generator";
 import type { Culture } from "@/generators/cultures-generator";
@@ -8,6 +9,7 @@ import type { Marker } from "@/generators/markers-generator";
 import type { Deal, Market } from "@/generators/markets-generator";
 import type { Measurer } from "@/generators/measurers-generator";
 import type { Province } from "@/generators/provinces-generator";
+import type { ReliefIcon } from "@/generators/relief-generator";
 import type { Religion } from "@/generators/religions-generator";
 import type { River } from "@/generators/river-generator";
 import type { Route } from "@/generators/routes-generator";
@@ -54,6 +56,7 @@ export interface PackedGraph {
     p: [number, number][]; // vertex points
   };
   rivers: River[];
+  relief: ReliefIcon[];
   biomes: Biome[];
   features: Feature[];
   burgs: Burg[];
@@ -69,4 +72,5 @@ export interface PackedGraph {
   markets: Market[];
   deals: Deal[];
   measurers: Measurer[];
+  addedLabels: AddedLabel[];
 }

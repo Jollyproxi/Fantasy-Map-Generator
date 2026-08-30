@@ -1,39 +1,34 @@
-import { drag, type Selection, select } from "d3";
-import { closeDialogs, confirmationDialog } from "@/components/dialog/dialog-helpers";
+import { type Selection, select } from "d3";
+import { closeDialogs, confirmationDialog, destroyDialog } from "@/components/dialog/dialog-helpers";
+import { Layers } from "@/components/layers";
 import { clearMainTip, tip } from "@/components/tooltips";
 import { applyDefaultViewboxEvents } from "@/components/viewbox-events";
 import { Controllers } from "@/controllers";
+import { removeEmblem } from "@/renderers/draw-emblems";
+import { EmblemRenderer } from "@/renderers/emblems/renderer";
 import { getHeight, openURL, speak } from "@/utils";
+import { MAX_ZOOM, PAN_ZOOM_IDENTITY, type PanZoom, panBy, zoomAt } from "@/utils/panZoomUtils";
 import type { Burg } from "../generators/burgs-generator";
-import {
-  convertTemperature,
-  destroyDialogIfExists,
-  ensureEl,
-  getPointer,
-  getTemperatureLikeness,
-  parseTransform,
-  rand,
-  rn
-} from "../utils";
+import { convertTemperature, ensureEl, getPointer, getTemperatureLikeness, rand, rn } from "../utils";
 import type { PromptOptions } from "../utils/commonUtils";
 
 declare const prompt: (text: string, options: PromptOptions, callback: (value: string | number) => void) => void;
 
 let selected: Selection<any, any, any, any> | null = null;
+let previewTransform: PanZoom = { ...PAN_ZOOM_IDENTITY };
+let previewMaxZoom = MAX_ZOOM;
+let previewCommittedK = 1;
+let previewSettleTimer = 0;
+let previewLayoutLocked = false;
 
 function open(id: number | string): void {
   if (customization) return;
   closeDialogs(".stable");
-  if (!layerIsOn("toggleBurgIcons")) toggleBurgIcons();
-  if (!layerIsOn("toggleLabels")) toggleLabels();
+  Layers.show("burgIcons", "labels");
 
-  selected = select<any, unknown>("#burgLabels").select(`[data-id='${id}']`);
+  selected = select<any, unknown>("#labels").select(`[data-label-type='burg'][data-id='${id}']`);
   if (!selected.size()) selected = select<any, unknown>("#burgIcons").select(`[data-id='${id}']`);
 
-  select<SVGTextElement, unknown>("#burgLabels")
-    .selectAll<SVGTextElement, unknown>("text")
-    .call(drag<SVGTextElement, unknown>().on("start", dragBurgLabel))
-    .classed("draggable", true);
   renderDialog();
   updateGroupsList();
   updateBurgValues();
@@ -47,8 +42,8 @@ function open(id: number | string): void {
 }
 
 function renderDialog(): void {
-  destroyDialogIfExists("burgEditor");
-  const editorHtml = /* html */ `<div id="burgEditor" class="dialog">
+  destroyDialog("burgEditor");
+  const editorHtml = /* html */ `<div id="burgEditor" class="dialog" data-burg-id="${getSelectedId()}">
       <div id="burgBody" style="padding-bottom: 0.3em">
         <div style="display: flex; align-items: center">
           <svg data-tip="Burg emblem. Click to edit" class="pointer" viewBox="0 0 200 200" width="13em" height="13em">
@@ -183,14 +178,18 @@ function renderDialog(): void {
             </div>
           </div>
         </div>
-        <div id="burgPreviewSection" data-tip="Burg map preview" style="display: flex; flex-direction: column">
+        <div id="burgPreviewSection" data-tip="Burg map preview: scroll to zoom, drag to pan" style="display: flex; flex-direction: column">
           <div style="display: flex; justify-content: space-between">
             <span>Burg preview:</span>
             <div style="display: flex; gap: 0.5em">
+              <i id="burgPreviewReset" data-tip="Reset preview zoom" class="icon-ccw pointer"></i>
               <i id="burgLinkOpen" data-tip="Open burg map in a new tab" class="icon-link-ext pointer"></i>
             </div>
           </div>
-          <div id="burgPreviewObject" style="pointer-events: none"></div>
+          <div
+            id="burgPreviewObject"
+            style="overflow: hidden; position: relative; touch-action: none; height: 320px; max-width: 60vw; max-height: 60vh"
+          ></div>
         </div>
       </div>
       <div id="burgBottom">
@@ -213,6 +212,7 @@ function renderDialog(): void {
             class="icon-anchor"
           ></button>
         </div>
+        <button id="burgEditLabel" data-tip="Edit this burg label" class="icon-font"></button>
         <button id="burgEditEmblem" data-tip="Edit emblem" class="icon-shield-alt"></button>
         <button id="burgSetPreviewLink" data-tip="Set custom burg map URL" class="icon-map-o"></button>
         <button id="burgLocate" data-tip="Zoom map and center view in the burg" class="icon-target"></button>
@@ -238,36 +238,41 @@ function renderDialog(): void {
     </div>`;
   ensureEl("dialogs").insertAdjacentHTML("beforeend", editorHtml);
 
-  ensureEl("burgName").on("input", changeName);
-  ensureEl("burgNameSpeak").on("click", () => speak(ensureEl<HTMLInputElement>("burgName").value));
-  ensureEl("burgNameReRandom").on("click", generateNameRandom);
-  ensureEl("burgGroup").on("change", changeGroup);
-  ensureEl("burgGroupConfigure").on("click", editBurgGroups);
-  ensureEl("burgType").on("change", changeType);
-  ensureEl("burgCulture").on("change", changeCulture);
-  ensureEl("burgNameReCulture").on("click", generateNameCulture);
-  ensureEl("burgPopulation").on("change", changePopulation);
+  ensureEl("burgName").addEventListener("input", changeName);
+  ensureEl("burgNameSpeak").addEventListener("click", () => speak(ensureEl<HTMLInputElement>("burgName").value));
+  ensureEl("burgNameReRandom").addEventListener("click", generateNameRandom);
+  ensureEl("burgGroup").addEventListener("change", changeGroup);
+  ensureEl("burgGroupConfigure").addEventListener("click", editBurgGroups);
+  ensureEl("burgType").addEventListener("change", changeType);
+  ensureEl("burgCulture").addEventListener("change", changeCulture);
+  ensureEl("burgNameReCulture").addEventListener("click", generateNameCulture);
+  ensureEl("burgPopulation").addEventListener("change", changePopulation);
   ensureEl("burgBody")
     .querySelectorAll<HTMLElement>(".burgFeature")
-    .forEach(el => void el.on("click", toggleFeature));
-  ensureEl("burgLinkOpen").on("click", openBurgLink);
+    .forEach(el => void el.addEventListener("click", toggleFeature));
+  ensureEl("burgLinkOpen").addEventListener("click", openBurgLink);
+  ensureEl("burgPreviewReset").addEventListener("click", resetPreviewZoom);
+  ensureEl("burgPreviewObject").addEventListener("wheel", onPreviewWheel as EventListener, { passive: false });
+  ensureEl("burgPreviewObject").addEventListener("dblclick", onPreviewDoubleClick as EventListener);
+  ensureEl("burgPreviewObject").addEventListener("pointerdown", onPreviewPointerDown as EventListener);
 
-  ensureEl("burgStyleShow").on("click", showStyleSection);
-  ensureEl("burgStyleHide").on("click", hideStyleSection);
-  ensureEl("burgEditLabelStyle").on("click", editGroupLabelStyle);
-  ensureEl("burgEditIconStyle").on("click", editGroupIconStyle);
-  ensureEl("burgEditAnchorStyle").on("click", editGroupAnchorStyle);
+  ensureEl("burgStyleShow").addEventListener("click", showStyleSection);
+  ensureEl("burgStyleHide").addEventListener("click", hideStyleSection);
+  ensureEl("burgEditLabelStyle").addEventListener("click", editGroupLabelStyle);
+  ensureEl("burgEditIconStyle").addEventListener("click", editGroupIconStyle);
+  ensureEl("burgEditAnchorStyle").addEventListener("click", editGroupAnchorStyle);
 
-  ensureEl("burgEmblem").on("click", openEmblemEdit);
-  ensureEl("burgSetPreviewLink").on("click", setCustomPreview);
-  ensureEl("burgEditEmblem").on("click", openEmblemEdit);
-  ensureEl("burgLocate").on("click", zoomIntoBurg);
-  ensureEl("burgRelocate").on("click", toggleRelocateBurg);
-  ensureEl("burglLegend").on("click", editBurgLegend);
-  ensureEl("burgLock").on("click", toggleBurgLockButton);
-  ensureEl("burgRemove").on("click", removeSelectedBurg);
-  ensureEl("burgTemperatureGraph").on("click", showTemperatureGraph);
-  ensureEl("burgProductionOverview").on("click", showProductionOverview);
+  ensureEl("burgEmblem").addEventListener("click", openEmblemEdit);
+  ensureEl("burgSetPreviewLink").addEventListener("click", setCustomPreview);
+  ensureEl("burgEditEmblem").addEventListener("click", openEmblemEdit);
+  ensureEl("burgLocate").addEventListener("click", zoomIntoBurg);
+  ensureEl("burgEditLabel").addEventListener("click", editBurgLabel);
+  ensureEl("burgRelocate").addEventListener("click", toggleRelocateBurg);
+  ensureEl("burglLegend").addEventListener("click", editBurgLegend);
+  ensureEl("burgLock").addEventListener("click", toggleBurgLockButton);
+  ensureEl("burgRemove").addEventListener("click", removeSelectedBurg);
+  ensureEl("burgTemperatureGraph").addEventListener("click", showTemperatureGraph);
+  ensureEl("burgProductionOverview").addEventListener("click", showProductionOverview);
 }
 
 function getSelectedId(): number {
@@ -323,29 +328,20 @@ function updateBurgValues(): void {
 
   // set emblem image
   const coaID = `burgCOA${id}`;
-  COArenderer.trigger(coaID, b.coa);
+  EmblemRenderer.trigger(coaID, b.coa);
   ensureEl("burgEmblem").setAttribute("href", `#${coaID}`);
 
   updateBurgPreview(b);
-}
-
-function dragBurgLabel(this: SVGTextElement, event: any): void {
-  const tr = parseTransform(this.getAttribute("transform")!);
-  const dx = +tr[0] - event.x;
-  const dy = +tr[1] - event.y;
-
-  event.on("drag", function (this: SVGTextElement, dragEvent: any) {
-    const { x, y } = dragEvent;
-    this.setAttribute("transform", `translate(${dx + x},${dy + y})`);
-    tip('Use dragging for fine-tuning only, to actually move burg use "Relocate" button', false, "warn");
-  });
 }
 
 function changeName(): void {
   const id = getSelectedId();
   const value = ensureEl<HTMLInputElement>("burgName").value;
   pack.burgs[id].name = value;
-  selected!.text(value);
+
+  if (!pack.burgs[id].label) pack.burgs[id].label = {};
+  Object.assign(pack.burgs[id].label, { text: value });
+  Layers.draw("labels");
 }
 
 function generateNameRandom(): void {
@@ -358,6 +354,7 @@ function changeGroup(this: HTMLSelectElement): void {
   const id = getSelectedId();
   const burg = pack.burgs[id];
   Burgs.changeGroup(burg, this.value);
+  Layers.draw("burgIcons", "labels");
 }
 
 function changeType(this: HTMLSelectElement): void {
@@ -470,6 +467,7 @@ function toggleCapital(burgId: number): void {
   const oldCapital = burgs[oldCapitalId];
   oldCapital.capital = 0;
   Burgs.changeGroup(oldCapital);
+  Layers.draw("burgIcons", "labels");
 }
 
 function toggleBurgLockButton(): void {
@@ -512,6 +510,12 @@ function editGroupLabelStyle(): void {
   editStyle("labels", g.id);
 }
 
+function editBurgLabel(): void {
+  const id = getSelectedId();
+  $("#burgEditor").dialog("close");
+  Controllers.LabelsEditor.open("burg", id);
+}
+
 function editGroupIconStyle(): void {
   const g = (selected!.node() as Element).parentNode as HTMLElement;
   closeDialogs(".stable");
@@ -524,6 +528,115 @@ function editGroupAnchorStyle(): void {
   editStyle("anchors", g.id);
 }
 
+function getPreviewViewport(): { width: number; height: number } {
+  const container = ensureEl("burgPreviewObject");
+  return { width: container.clientWidth, height: container.clientHeight };
+}
+
+// mid-gesture the frame is scaled with a cheap transform; the layout size is committed
+// only once the gesture settles, as generators re-render asynchronously on resize.
+// canvas-backed generators (watabou) never commit at all: resizing clears their canvas
+// to transparent until the next redraw, so their layout is locked at a supersampled
+// size on load and zoom stays a pure transform of it
+function applyPreviewTransform(): void {
+  const container = ensureEl("burgPreviewObject");
+  const frame = container.querySelector<HTMLIFrameElement>("iframe");
+  if (!frame) return;
+  const { k, x, y } = previewTransform;
+  frame.style.transformOrigin = "0 0";
+  frame.style.transform = `translate(${x}px, ${y}px) scale(${k / previewCommittedK})`;
+  frame.style.left = "0";
+  frame.style.top = "0";
+  container.style.cursor = k > 1 ? "grab" : "default";
+  clearTimeout(previewSettleTimer);
+  if (!previewLayoutLocked) previewSettleTimer = window.setTimeout(commitPreviewTransform, 200);
+}
+
+function commitPreviewTransform(): void {
+  if (previewLayoutLocked) return;
+  const frame = ensureEl("burgPreviewObject").querySelector<HTMLIFrameElement>("iframe");
+  if (!frame) return;
+  const { k, x, y } = previewTransform;
+  previewCommittedK = k;
+  frame.style.width = `${k * 100}%`;
+  frame.style.height = `${k * 100}%`;
+  frame.style.transform = "none";
+  frame.style.left = `${x}px`;
+  frame.style.top = `${y}px`;
+}
+
+function resetPreviewZoom(): void {
+  previewTransform = { ...PAN_ZOOM_IDENTITY };
+  clearTimeout(previewSettleTimer);
+  if (previewLayoutLocked) applyPreviewTransform();
+  else commitPreviewTransform();
+  ensureEl("burgPreviewObject").style.cursor = "default";
+}
+
+function previewPointFromEvent(event: MouseEvent): { x: number; y: number } {
+  const rect = ensureEl("burgPreviewObject").getBoundingClientRect();
+  return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+}
+
+function onPreviewWheel(event: WheelEvent): void {
+  event.preventDefault();
+  const factor = Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.05 : event.deltaMode ? 1 : 0.002));
+  previewTransform = zoomAt(
+    previewTransform,
+    previewPointFromEvent(event),
+    factor,
+    getPreviewViewport(),
+    previewMaxZoom
+  );
+  applyPreviewTransform();
+}
+
+function onPreviewDoubleClick(event: MouseEvent): void {
+  previewTransform = zoomAt(previewTransform, previewPointFromEvent(event), 2, getPreviewViewport(), previewMaxZoom);
+  applyPreviewTransform();
+}
+
+function onPreviewPointerDown(event: PointerEvent): void {
+  if (previewTransform.k <= 1) return;
+  event.preventDefault();
+  const container = ensureEl("burgPreviewObject");
+  container.setPointerCapture(event.pointerId);
+  container.style.cursor = "grabbing";
+  let last = { x: event.clientX, y: event.clientY };
+
+  const move = (e: Event) => {
+    const p = e as PointerEvent;
+    previewTransform = panBy(previewTransform, p.clientX - last.x, p.clientY - last.y, getPreviewViewport());
+    last = { x: p.clientX, y: p.clientY };
+    applyPreviewTransform();
+  };
+  const up = () => {
+    container.removeEventListener("pointermove", move);
+    container.removeEventListener("pointerup", up);
+    container.removeEventListener("pointercancel", up);
+    container.style.cursor = "grab";
+  };
+  container.addEventListener("pointermove", move);
+  container.addEventListener("pointerup", up);
+  container.addEventListener("pointercancel", up);
+}
+
+let glMaxTextureSize = 0;
+function getGlMaxTextureSize(): number {
+  if (!glMaxTextureSize) {
+    const gl = document.createElement("canvas").getContext("webgl");
+    glMaxTextureSize = gl ? (gl.getParameter(gl.MAX_TEXTURE_SIZE) as number) : 4096;
+  }
+  return glMaxTextureSize;
+}
+
+// half the reported limit: the generator's internal render textures pad past the raw canvas size
+function getPreviewTextureBudgetK(): number {
+  const { width, height } = getPreviewViewport();
+  const paneMax = Math.max(width, height, 1);
+  return getGlMaxTextureSize() / 2 / (devicePixelRatio * paneMax);
+}
+
 function updateBurgPreview(burg: Burg): void {
   const preview = Burgs.getPreview(burg).preview;
   if (!preview) {
@@ -533,15 +646,29 @@ function updateBurgPreview(burg: Burg): void {
 
   ensureEl("burgPreviewSection").style.display = "block";
 
-  // recreate object to force reload (Chrome bug)
+  // recreate the element to force reload (Chrome bug)
   const container = ensureEl("burgPreviewObject");
   container.innerHTML = "";
-  const object = document.createElement("object");
-  object.style.width = "100%";
-  object.style.maxWidth = "60vw";
-  object.style.maxHeight = "60vh";
-  object.data = preview;
-  container.insertBefore(object, null);
+  const frame = document.createElement("iframe");
+  frame.style.position = "absolute";
+  frame.style.border = "none";
+  frame.style.pointerEvents = "none";
+  frame.setAttribute("sandbox", "allow-scripts allow-same-origin");
+  frame.src = preview;
+  container.insertBefore(frame, null);
+
+  previewLayoutLocked = preview.includes("watabou.github.io");
+  if (previewLayoutLocked) {
+    const supersample = Math.max(1, Math.min(4, getPreviewTextureBudgetK()));
+    previewCommittedK = supersample;
+    frame.style.width = `${supersample * 100}%`;
+    frame.style.height = `${supersample * 100}%`;
+    previewMaxZoom = Math.min(MAX_ZOOM, supersample * 2.5);
+  } else {
+    previewCommittedK = 1;
+    previewMaxZoom = MAX_ZOOM;
+  }
+  resetPreviewZoom();
 }
 
 function openBurgLink(): void {
@@ -578,22 +705,23 @@ function zoomIntoBurg(): void {
   zoomTo(burg.x, burg.y, 8, 2000);
 }
 
+let isCellsLayerForced = false; // the cells layer is turned on for the relocation mode
+
 function toggleRelocateBurg(): void {
-  const toggler = ensureEl("toggleCells");
   ensureEl("burgRelocate").classList.toggle("pressed");
   if (ensureEl("burgRelocate").classList.contains("pressed")) {
     select<SVGGElement, unknown>("#viewbox").style("cursor", "crosshair").on("click", relocateBurgOnClick);
     tip("Click on map to relocate burg. Hold Shift for continuous move", true);
-    if (!layerIsOn("toggleCells")) {
-      toggleCells();
-      toggler.dataset.forced = "true";
+    if (!Layers.isOn("cells")) {
+      Layers.show("cells");
+      isCellsLayerForced = true;
     }
   } else {
     clearMainTip();
     applyDefaultViewboxEvents();
-    if (layerIsOn("toggleCells") && toggler.dataset.forced) {
-      toggleCells();
-      toggler.dataset.forced = "false";
+    if (isCellsLayerForced) {
+      Layers.hide("cells");
+      isCellsLayerForced = false;
     }
   }
 }
@@ -601,7 +729,7 @@ function toggleRelocateBurg(): void {
 function relocateBurgOnClick(this: SVGGElement, event: any): void {
   const cells = pack.cells;
   const point = getPointer(event, this);
-  const cellId = findCell(point[0], point[1])!;
+  const cellId = Pack.findCell(point[0], point[1])!;
   const id = getSelectedId();
   const burg = pack.burgs[id];
 
@@ -626,7 +754,6 @@ function relocateBurgOnClick(this: SVGGElement, event: any): void {
   const y = rn(point[1], 2);
 
   select("#burgIcons").select(`#burg${id}`).attr("x", x).attr("y", y);
-  select("#burgLabels").select(`#burgLabel${id}`).attr("transform", null).attr("x", x).attr("y", y);
 
   const anchor = select("#anchors").select(`use[data-id='${id}']`);
   if (anchor.size()) {
@@ -644,6 +771,10 @@ function relocateBurgOnClick(this: SVGGElement, event: any): void {
   burg.x = x;
   burg.y = y;
   if (burg.capital) pack.states[newState].center = burg.cell;
+
+  // the label snaps back to the relocated burg, so its custom path is no longer valid
+  if (burg.label) Object.assign(burg.label, { dx: 0, dy: 0, pathPoints: undefined });
+  Layers.draw("labels");
 
   if (event.shiftKey === false) toggleRelocateBurg();
 }
@@ -697,6 +828,8 @@ function removeSelectedBurg(): void {
       confirm: "Remove",
       onConfirm: () => {
         Burgs.remove(burgId);
+        removeEmblem("burg", burgId);
+        Layers.draw("burgIcons", "labels");
         $("#burgEditor").dialog("close");
       }
     });
@@ -709,10 +842,6 @@ function editBurgGroups(): void {
 
 function closeBurgEditor(): void {
   if (ensureEl("burgRelocate").classList.contains("pressed")) toggleRelocateBurg();
-  select<SVGTextElement, unknown>("#burgLabels")
-    .selectAll<SVGTextElement, unknown>("text")
-    .on(".drag", null)
-    .classed("draggable", false);
   selected = null;
   $("#burgEditor").dialog("destroy");
   ensureEl("burgEditor").remove();

@@ -964,7 +964,6 @@ export class GoodsModule {
 
   // Place a bonus good on every eligible cell based on the current catalogue
   generate(options: { randomSeed?: number } = {}) {
-    TIME && console.time("generateGoods");
     Math.random = Alea(options.randomSeed ?? seed);
     const shuffle = shuffler(() => Math.random());
 
@@ -1002,7 +1001,6 @@ export class GoodsModule {
       }
     }
 
-    TIME && console.timeEnd("generateGoods");
     this.sync();
   }
 
@@ -1069,7 +1067,7 @@ export class GoodsModule {
       shore: (...rings: number[]) => rings.includes(pack.cells.t[cellId]),
       type: (...types: string[]) => {
         const feature = pack.features[pack.cells.f[cellId]];
-        return types.includes(feature.group || feature.type);
+        return types.includes(feature.subtype || feature.type);
       },
       river: () => pack.cells.r[cellId]
     };

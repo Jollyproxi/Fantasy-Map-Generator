@@ -1,9 +1,11 @@
 import { closeDialogs, confirmationDialog } from "@/components/dialog/dialog-helpers";
 import { heightmapTemplates } from "@/data/heightmap-templates";
 import { precreatedHeightmaps } from "@/data/precreated-heightmaps";
+import { drawHeights } from "@/renderers/draw-heightmap";
+import type { GridGraph } from "@/types/GridGraph";
 import { applyOption } from "@/utils";
 import { lock } from "@/utils/preferences";
-import { drawHeights, ensureEl, generateGrid, generateSeed, shouldRegenerateGrid } from "../utils";
+import { ensureEl, generateSeed } from "../utils";
 
 const initialSeed = generateSeed();
 let graph = getGraph(grid);
@@ -233,7 +235,7 @@ function insertHtml(): void {
 }
 
 function addListeners(): void {
-  ensureEl("heightmapSelection").on("click", event => {
+  ensureEl("heightmapSelection").addEventListener("click", event => {
     const target = (event as MouseEvent).target as HTMLElement;
     const article = target.closest<HTMLElement>("#heightmapSelection article");
     if (!article) return;
@@ -244,13 +246,13 @@ function addListeners(): void {
     setSelected(id);
   });
 
-  ensureEl("heightmapSelectionRenderOcean").on("change", redrawAll);
-  ensureEl("heightmapSelectionColorScheme").on("change", redrawAll);
-  ensureEl("heightmapSelectionRedrawPreview").on("click", redrawAll);
-  ensureEl("heightmapSelectionEditTemplates").on("click", event =>
+  ensureEl("heightmapSelectionRenderOcean").addEventListener("change", redrawAll);
+  ensureEl("heightmapSelectionColorScheme").addEventListener("change", redrawAll);
+  ensureEl("heightmapSelectionRedrawPreview").addEventListener("click", redrawAll);
+  ensureEl("heightmapSelectionEditTemplates").addEventListener("click", event =>
     confirmHeightmapEdit(event.currentTarget as HTMLElement)
   );
-  ensureEl("heightmapSelectionImportHeightmap").on("click", event =>
+  ensureEl("heightmapSelectionImportHeightmap").addEventListener("click", event =>
     confirmHeightmapEdit(event.currentTarget as HTMLElement)
   );
 }
@@ -274,11 +276,11 @@ function getName(id: string): string {
   return isTemplate ? heightmapTemplates[id].name : precreatedHeightmaps[id].name;
 }
 
-function getGraph(currentGraph: any): any {
-  const newGraph = shouldRegenerateGrid(currentGraph, seed as unknown as number, graphWidth, graphHeight)
-    ? generateGrid(seed, graphWidth, graphHeight)
+function getGraph(currentGraph: GridGraph): GridGraph {
+  const newGraph = Grid.shouldRegenerate(currentGraph, seed, graphWidth, graphHeight)
+    ? Grid.generate(seed, graphWidth, graphHeight)
     : structuredClone(currentGraph);
-  delete newGraph.cells.h;
+  Grid.resetHeights(newGraph);
   return newGraph;
 }
 

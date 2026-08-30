@@ -1,5 +1,6 @@
 import polylabel from "polylabel";
-import type { Point, Vertices } from "../generators/voronoi";
+import type { Point } from "@/types/global";
+import type { Vertices } from "../generators/voronoi";
 import type { PackedGraph } from "../types/PackedGraph";
 import { rn } from "./numberUtils";
 
@@ -70,6 +71,20 @@ const restorePath = (exit: number, start: number, from: number[]): number[] => {
   return pathCells.reverse();
 };
 
+/** both the grid and the packed graph are valid inputs, only the fields below are used */
+type IsolineGraph = {
+  cells: {
+    i: Iterable<number> & ArrayLike<number>;
+    c: number[][];
+    v: number[][];
+    f: ArrayLike<number>;
+    h: ArrayLike<number>;
+    b: ArrayLike<number | boolean>;
+  };
+  vertices: Vertices;
+  features: { type: string; shoreline?: number[] }[];
+};
+
 /**
  * Returns isolines (borders) for different types of cells in the graph.
  * @param {object} graph - The graph object containing cells and vertices.
@@ -82,7 +97,7 @@ const restorePath = (exit: number, start: number, from: number[]): number[] => {
  * @returns {object} An object containing isolines for each type based on the specified options.
  */
 export const getIsolines = (
-  { cells, vertices, features }: PackedGraph,
+  { cells, vertices, features }: IsolineGraph,
   getType: (cellId: number) => string | number | null,
   options: {
     polygons?: boolean;
@@ -355,6 +370,44 @@ export const findPath = (
   return null;
 };
 
+export const parsePathPoints = (path: string): Point[] => {
+  const points: Point[] = [];
+  let x = 0;
+  let y = 0;
+
+  const addPoint = (nextX: number, nextY: number, relative: boolean) => {
+    x = relative ? x + nextX : nextX;
+    y = relative ? y + nextY : nextY;
+    points.push([x, y]);
+  };
+
+  for (const match of path.matchAll(/([AaCcHhLlMmQqSsTtVvZz])([^AaCcHhLlMmQqSsTtVvZz]*)/g)) {
+    const command = match[1];
+    const type = command.toUpperCase();
+    const relative = command !== type;
+    const values = match[2].match(/[-+]?(?:\d*\.?\d+)(?:e[-+]?\d+)?/gi)?.map(Number) || [];
+
+    if (type === "H") {
+      for (const nextX of values) addPoint(nextX, relative ? 0 : y, relative);
+      continue;
+    }
+
+    if (type === "V") {
+      for (const nextY of values) addPoint(relative ? 0 : x, nextY, relative);
+      continue;
+    }
+
+    const stride = { A: 7, C: 6, Q: 4, S: 4, M: 2, L: 2, T: 2 }[type];
+    if (!stride) continue;
+
+    for (let index = 0; index + stride <= values.length; index += stride) {
+      addPoint(values[index + stride - 2], values[index + stride - 1], relative);
+    }
+  }
+
+  return points;
+};
+
 type MeanderOptions = {
   anchors?: Point[];
   meandering?: number;
@@ -376,12 +429,13 @@ export const meander = (cells: number[], cellPositions: Point[], options: Meande
   const isWaterCell = options.isWaterCell;
 
   const anchorPoints: Point[] = cells.map((cell, i) => {
-    if (customAnchors) return customAnchors[i];
+    if (customAnchors?.[i]) return customAnchors[i];
     if (cell === -1) {
       const prevCell = cells[i - 1];
       const prev: Point = prevCell !== undefined && prevCell >= 0 ? cellPositions[prevCell] : [0, 0];
       if (!bounds) return prev;
-      return projectToNearestEdge(prev, bounds.width, bounds.height);
+      const point = projectToNearestEdge(prev, bounds.width, bounds.height);
+      return point;
     }
     return cellPositions[cell];
   });
@@ -392,6 +446,7 @@ export const meander = (cells: number[], cellPositions: Point[], options: Meande
   let step = startStep;
 
   for (let i = 0; i <= lastStep; i++, step++) {
+    if (!anchorPoints[i]) continue;
     const [x1, y1] = anchorPoints[i];
     anchorIndices.push(points.length);
     points.push([x1, y1]);
@@ -401,6 +456,7 @@ export const meander = (cells: number[], cellPositions: Point[], options: Meande
     const nextCell = cells[i + 1];
     if (nextCell === -1) continue; // boundary anchor will be emitted on next iter without interpolation
 
+    if (!anchorPoints[i + 1]) continue;
     const [x2, y2] = anchorPoints[i + 1];
     const dist2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
     if (dist2 <= 25 && cellCount >= 6) continue;

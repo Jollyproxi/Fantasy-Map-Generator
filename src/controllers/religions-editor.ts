@@ -1,63 +1,132 @@
 import { drag, easeSinIn, select, transition } from "d3";
-import { closeDialogs, confirmationDialog } from "@/components/dialog/dialog-helpers";
+import { closeDialogs, confirmationDialog, destroyDialog, updateDialog } from "@/components/dialog/dialog-helpers";
 import { applyLineHighlighting } from "@/components/dialog/highlighting";
-import { applySorting, applySortingByHeader } from "@/components/dialog/sorting";
-import { clearMainTip, showMainTip, tip } from "@/components/tooltips";
+import { bindColumnSorting, sortDataByColumns } from "@/components/dialog/sorting";
+import { dialogState } from "@/components/dialog/state";
+import {
+  type EditorColumn,
+  initColumnVisibility,
+  initEditorTable,
+  renderEditorHeader,
+  renderEditorPagination,
+  type TableView
+} from "@/components/dialog/table";
+import { Layers } from "@/components/layers";
+import { clearMainTip, tip } from "@/components/tooltips";
 import { applyDefaultViewboxEvents } from "@/components/viewbox-events";
 import { Controllers } from "@/controllers";
+import type { Religion } from "@/generators/religions-generator";
 import { clearLegend, drawLegend } from "@/renderers/draw-legend";
-import { moveCircle, removeCircle } from "@/renderers/overlays/brush-circle";
 import { highlightElement } from "@/renderers/overlays/highlight";
 import { downloadFile, getArea, getAreaUnit, getFileName } from "@/utils";
-import {
-  abbreviate,
-  debounce,
-  destroyDialogIfExists,
-  ensureEl,
-  findAllCellsInRadius,
-  getPackPolygon,
-  getPointer,
-  isLand,
-  parseTransform,
-  rn,
-  si
-} from "../utils";
+import { abbreviate, debounce, ensureEl, getPointer, isLand, parseTransform, rn, si } from "../utils";
+
+const dialogId = "religionsEditor" as const;
+const position = { my: "right top", at: "right-10 top+10", of: "svg", collision: "fit" };
+let filterState: { showExtinct: boolean };
+
+const columns: EditorColumn<Religion>[] = [
+  { key: "color", width: "1.2em", permanent: true },
+  {
+    key: "name",
+    label: "Religion",
+    width: "14em",
+    permanent: true,
+    sortBy: religion => religion.name || "",
+    sortType: "alpha"
+  },
+  {
+    key: "type",
+    label: "Type",
+    width: "6em",
+    defaultSort: "asc",
+    sortBy: religion => religion.type || "",
+    sortType: "alpha"
+  },
+  {
+    key: "form",
+    label: "Form",
+    width: "7em",
+    mobileHidden: true,
+    sortBy: religion => religion.form || "",
+    sortType: "alpha"
+  },
+  {
+    key: "deity",
+    label: "Deity",
+    width: "14em",
+    mobileHidden: true,
+    sortBy: religion => religion.deity || "",
+    sortType: "alpha"
+  },
+  {
+    key: "area",
+    label: "Area",
+    width: "7em",
+    mobileHidden: true,
+    sortBy: religion => religion.area || 0
+  },
+  {
+    key: "population",
+    label: "Population",
+    width: "6em",
+    sortBy: religion => (religion.rural || 0) * populationRate + (religion.urban || 0) * populationRate * urbanization
+  },
+  {
+    key: "expansion",
+    label: "Expansion",
+    width: "5em",
+    hidden: true,
+    mobileHidden: true,
+    sortBy: religion => religion.expansion || "",
+    sortType: "alpha"
+  },
+  {
+    key: "expansionism",
+    label: "Expansionism",
+    width: "5em",
+    hidden: true,
+    mobileHidden: true,
+    sortBy: religion => religion.expansionism || 0
+  },
+  { key: "actions", width: "3.2em", permanent: true, align: "right" }
+];
+
+function getFilteredReligions(): Religion[] {
+  return pack.religions.filter(r => !r.removed && !(r.i && !r.cells && !filterState.showExtinct));
+}
+
+const religionsTable = initEditorTable<Religion>({
+  getData: () => sortDataByColumns(dialogId, getFilteredReligions(), columns),
+  onUpdate: religionsEditorAddLines
+});
 
 function open(): void {
   if (customization) return;
-  closeDialogs("#religionsEditor, .stable");
-  if (!layerIsOn("toggleReligions")) toggleReligions();
-  if (layerIsOn("toggleStates")) toggleStates();
-  if (layerIsOn("toggleBiomes")) toggleBiomes();
-  if (layerIsOn("toggleCultures")) toggleCultures();
-  if (layerIsOn("toggleProvinces")) toggleProvinces();
+  filterState = dialogState.get(dialogId, "filters", () => ({ showExtinct: false }));
+  closeDialogs(`#${dialogId}, .stable`);
+  Layers.show("religions");
+  Layers.hide("states", "biomes");
+  Layers.hide("cultures", "provinces");
 
   renderDialog();
-  refreshReligionsEditor();
+  religionsCollectStatistics();
   drawReligionCenters();
+  religionsTable.reset();
 
-  $("#religionsEditor").dialog({
+  $(`#${dialogId}`).dialog({
     title: "Religions Editor",
     resizable: false,
+    width: "fit-content",
     close: closeReligionsEditor,
-    position: { my: "right top", at: "right-10 top+10", of: "svg" }
+    position
   });
 }
 
 function renderDialog(): void {
-  destroyDialogIfExists("religionsEditor");
-  const editorHtml = /* html */ `<div id="religionsEditor" class="dialog stable">
-    <div id="religionsHeader" class="header" style="grid-template-columns: 13em 6em 7em 18em 6em 7em 6em 7em">
-      <div data-tip="Click to sort by religion name" class="sortable alphabetically" data-sortby="name">Religion&nbsp;</div>
-      <div data-tip="Click to sort by religion type" class="sortable alphabetically icon-sort-name-down" data-sortby="type">Type&nbsp;</div>
-      <div data-tip="Click to sort by religion form" class="sortable alphabetically" data-sortby="form">Form&nbsp;</div>
-      <div data-tip="Click to sort by supreme deity" class="sortable alphabetically hide" data-sortby="deity">Supreme Deity&nbsp;</div>
-      <div data-tip="Click to sort by religion area" class="sortable hide" data-sortby="area">Area&nbsp;</div>
-      <div data-tip="Click to sort by number of believers (religion area population)" class="sortable hide" data-sortby="population">Believers&nbsp;</div>
-      <div data-tip="Click to sort by potential extent type" class="sortable alphabetically hide" data-sortby="expansion">Potential&nbsp;</div>
-      <div data-tip="Click to sort by expansionism" class="sortable hide" data-sortby="expansionism">Expansion&nbsp;</div>
-    </div>
-    <div id="religionsBody" class="table" data-type="absolute"></div>
+  destroyDialog("religionsEditor");
+  const editorHtml = /* html */ `<div id="religionsEditor" class="dialog stable editorDialog">
+    <div id="religionsBody" class="table" data-type="absolute">${renderEditorHeader({ dialogId, columns })}</div>
 
     <div id="religionsFooter" class="totalLine">
       <div data-tip="Total number of organized religions" style="margin-left: 12px">
@@ -72,15 +141,15 @@ function renderDialog(): void {
       <div data-tip="Total number of folk religions" style="margin-left: 12px">
         Folk:&nbsp;<span id="religionsFolk">0</span>
       </div>
-      <div data-tip="Total land area" style="margin-left: 12px">
+      <div data-tip="Total land area" style="margin-left: 12px" data-col="area">
         Land Area:&nbsp;<span id="religionsFooterArea">0</span>
       </div>
-      <div data-tip="Total number of believers (population)" style="margin-left: 12px">
+      <div data-tip="Total number of believers (population)" style="margin-left: 12px" data-col="population">
         Believers:&nbsp;<span id="religionsFooterPopulation">0</span>
       </div>
     </div>
 
-    <div id="religionsBottom">
+    <div id="religionsBottom" class="editorToolbar">
       <button id="religionsEditorRefresh" data-tip="Refresh the Editor" class="icon-cw"></button>
       <button id="religionsEditStyle" data-tip="Edit religions style in Style Editor" class="icon-adjust"></button>
       <button id="religionsLegend" data-tip="Toggle Legend box" class="icon-list-bullet"></button>
@@ -89,21 +158,13 @@ function renderDialog(): void {
       <button id="religionsExtinct" data-tip="Show/hide extinct religions (religions without cells)" class="icon-eye-off"></button>
 
       <button id="religionsManually" data-tip="Manually re-assign religions" class="icon-brush"></button>
-      <div id="religionsManuallyButtons" style="display: none">
-        <div data-tip="Change brush size. Shortcuts: + or ] to increase; - or [ to decrease" style="margin-block: 0.3em;">
-          <slider-input id="religionsBrush" min="1" max="100" value="15">Brush size:</slider-input>
-        </div>
-        <button id="religionsManuallyApply" data-tip="Apply assignment" class="icon-check"></button>
-        <button id="religionsManuallyCancel" data-tip="Cancel assignment" class="icon-cancel"></button>
-        <div data-tip="When enabled, only cells without religion can be painted" style="display: inline-block">
-          <input id="religionsManuallyProtect" class="checkbox" type="checkbox" />
-          <label for="religionsManuallyProtect" class="checkbox-label"><i>do not overwrite existing</i></label>
-        </div>
-      </div>
       <button id="religionsAdd" data-tip="Add a new religion. Hold Shift to add multiple" class="icon-plus"></button>
       <button id="religionsExport" data-tip="Download religions-related data" class="icon-download"></button>
       <button id="religionsRecalculate" data-tip="Recalculate religions based on current values of growth-related attributes" class="icon-retweet"></button>
-      <span data-tip="Allow religion center, extent, and expansionism changes to take an immediate effect">
+      <span
+        data-tip="Allow religion center, extent, and expansionism changes to take an immediate effect"
+        class="editorToolbarPanel"
+      >
         <input id="religionsAutoChange" class="checkbox" type="checkbox" />
         <label for="religionsAutoChange" class="checkbox-label"><i>auto-apply changes</i></label>
       </span>
@@ -111,26 +172,30 @@ function renderDialog(): void {
   </div>`;
 
   ensureEl("dialogs").insertAdjacentHTML("beforeend", editorHtml);
-  applySortingByHeader("religionsHeader");
-  applyLineHighlighting("religionsEditor", ({ cellId }) => pack.cells.religion[cellId]);
+  syncFilterControls();
+  bindColumnSorting(dialogId, religionsTable.reset);
+  applyLineHighlighting(dialogId, ({ cellId }) => pack.cells.religion[cellId]);
 
-  ensureEl("religionsEditorRefresh").on("click", refreshReligionsEditor);
-  ensureEl("religionsEditStyle").on("click", () => editStyle("relig"));
-  ensureEl("religionsLegend").on("click", toggleLegend);
-  ensureEl("religionsPercentage").on("click", togglePercentageMode);
-  ensureEl("religionsHeirarchy").on("click", showHierarchy);
-  ensureEl("religionsExtinct").on("click", toggleExtinct);
-  ensureEl("religionsManually").on("click", enterReligionsManualAssignent);
-  ensureEl("religionsManuallyApply").on("click", applyReligionsManualAssignent);
-  ensureEl("religionsManuallyCancel").on("click", () => exitReligionsManualAssignment());
-  ensureEl("religionsAdd").on("click", enterAddReligionMode);
-  ensureEl("religionsExport").on("click", downloadReligionsCsv);
-  ensureEl("religionsRecalculate").on("click", () => recalculateReligions(true));
+  ensureEl("religionsEditorRefresh").addEventListener("click", refreshReligionsEditor);
+  initColumnVisibility({
+    dialogId,
+    columns,
+    onUpdate: () => updateDialog(dialogId, { width: "fit-content", position })
+  });
+  ensureEl("religionsEditStyle").addEventListener("click", () => editStyle("relig"));
+  ensureEl("religionsLegend").addEventListener("click", toggleLegend);
+  ensureEl("religionsPercentage").addEventListener("click", togglePercentageMode);
+  ensureEl("religionsHeirarchy").addEventListener("click", showHierarchy);
+  ensureEl("religionsExtinct").addEventListener("click", toggleExtinct);
+  ensureEl("religionsManually").addEventListener("click", openPaintEditor);
+  ensureEl("religionsAdd").addEventListener("click", enterAddReligionMode);
+  ensureEl("religionsExport").addEventListener("click", downloadReligionsCsv);
+  ensureEl("religionsRecalculate").addEventListener("click", () => recalculateReligions(true));
 }
 
 function refreshReligionsEditor(): void {
   religionsCollectStatistics();
-  religionsEditorAddLines();
+  religionsTable.refresh();
 }
 
 function religionsCollectStatistics(): void {
@@ -151,16 +216,19 @@ function religionsCollectStatistics(): void {
 }
 
 // add line for each religion
-function religionsEditorAddLines(): void {
+function religionsEditorAddLines(view: TableView<Religion>): void {
   const unit = ` ${getAreaUnit()}`;
   let lines = "";
   let totalArea = 0;
   let totalPopulation = 0;
 
-  for (const r of pack.religions) {
-    if (r.removed) continue;
-    if (r.i && !r.cells && ensureEl("religionsBody").dataset.extinct !== "show") continue; // hide extinct religions
+  // totals span the full filtered set, not just the current page
+  for (const r of view.all) {
+    totalArea += getArea(r.area ?? 0);
+    totalPopulation += rn((r.rural ?? 0) * populationRate + (r.urban ?? 0) * populationRate * urbanization);
+  }
 
+  for (const r of view.rows) {
     const area = getArea(r.area ?? 0);
     const rural = (r.rural ?? 0) * populationRate;
     const urban = (r.urban ?? 0) * populationRate * urbanization;
@@ -168,8 +236,6 @@ function religionsEditorAddLines(): void {
     const populationTip = `Believers: ${si(population)}; Rural areas: ${si(rural)}; Urban areas: ${si(
       urban
     )}. Click to change`;
-    totalArea += area;
-    totalPopulation += population;
 
     if (!r.i) {
       // No religion (neutral) line
@@ -186,21 +252,34 @@ function religionsEditorAddLines(): void {
         data-expansion=""
         data-expansionism=""
       >
-        <svg width="9" height="9" class="placeholder"></svg>
-        <input data-tip="Religion name. Click and type to change" class="religionName italic" style="width: 11em"
-          value="${r.name}" autocorrect="off" spellcheck="false" />
-        <select data-tip="Religion type" class="religionType placeholder" style="width: 5em">
+        <svg width="9" height="9" class="placeholder" data-col="color"></svg>
+        <input data-tip="Religion name. Click and type to change" class="religionName italic"
+          value="${r.name}" autocorrect="off" spellcheck="false" data-col="name" />
+        <select data-tip="Religion type" class="religionType placeholder" data-col="type">
           ${getTypeOptions(r.type)}
         </select>
-        <input data-tip="Religion form" class="religionForm placeholder" style="width: 6em" value="" autocorrect="off" spellcheck="false" />
-        <span data-tip="Click to re-generate supreme deity" class="icon-arrows-cw placeholder hide"></span>
-        <input data-tip="Religion supreme deity" class="religionDeity placeholder hide" style="width: 17em" value="" autocorrect="off" spellcheck="false" />
-        <span data-tip="Religion area" style="padding-right: 4px" class="icon-map-o hide"></span>
-        <div data-tip="Religion area" class="religionArea hide" style="width: 6em">${si(area) + unit}</div>
-        <span data-tip="${populationTip}" class="icon-male hide"></span>
-        <div data-tip="${populationTip}" class="religionPopulation hide pointer" style="width: 5em">${si(
-          population
-        )}</div>
+        <input data-tip="Religion form" class="religionForm placeholder" value="" autocorrect="off" spellcheck="false" data-col="form" />
+        <div data-col="deity">
+          <span class="icon-arrows-cw placeholder"></span>
+          <input class="religionDeity placeholder" value="" autocorrect="off" spellcheck="false" />
+        </div>
+        <div data-col="area">
+          <span data-tip="Religion area" style="padding-right: 4px" class="icon-map-o"></span>
+          <div data-tip="Religion area" class="religionArea">${si(area) + unit}</div>
+        </div>
+        <div data-col="population">
+          <span data-tip="${populationTip}" class="icon-male"></span>
+          <div data-tip="${populationTip}" class="religionPopulation pointer">${si(population)}</div>
+        </div>
+        <div data-col="expansion">
+          <span class="icon-resize-full-alt placeholder" style="padding-right: 2px"></span>
+          <span class="religionExtent placeholder">n/a</span>
+        </div>
+        <div data-col="expansionism">
+          <span class="icon-resize-full placeholder"></span>
+          <input class="religionExpantion placeholder" disabled type="number" value="0" />
+        </div>
+        <div data-col="actions"></div>
       </div>`;
       continue;
     }
@@ -218,30 +297,40 @@ function religionsEditorAddLines(): void {
       data-expansion="${r.expansion}"
       data-expansionism="${r.expansionism}"
     >
-      <fill-box fill="${r.color}"></fill-box>
-      <input data-tip="Religion name. Click and type to change" class="religionName" style="width: 11em"
-        value="${r.name}" autocorrect="off" spellcheck="false" />
-      <select data-tip="Religion type" class="religionType" style="width: 5em">
+      <fill-box fill="${r.color}" data-col="color"></fill-box>
+      <input data-tip="Religion name. Click and type to change" class="religionName"
+        value="${r.name}" autocorrect="off" spellcheck="false" data-col="name" />
+      <select data-tip="Religion type" class="religionType" data-col="type">
         ${getTypeOptions(r.type)}
       </select>
-      <input data-tip="Religion form" class="religionForm" style="width: 6em"
-        value="${r.form}" autocorrect="off" spellcheck="false" />
-      <span data-tip="Click to re-generate supreme deity" class="icon-arrows-cw hide"></span>
-      <input data-tip="Religion supreme deity" class="religionDeity hide" style="width: 17em"
-        value="${r.deity || ""}" autocorrect="off" spellcheck="false" />
-      <span data-tip="Religion area" style="padding-right: 4px" class="icon-map-o hide"></span>
-      <div data-tip="Religion area" class="religionArea hide" style="width: 6em">${si(area) + unit}</div>
-      <span data-tip="${populationTip}" class="icon-male hide"></span>
-      <div data-tip="${populationTip}" class="religionPopulation hide pointer" style="width: 5em">${si(
-        population
-      )}</div>
+      <input data-tip="Religion form" class="religionForm"
+        value="${r.form}" autocorrect="off" spellcheck="false" data-col="form" />
+      <div data-col="deity">
+        <span data-tip="Click to re-generate supreme deity" class="icon-arrows-cw pointer"></span>
+        <input data-tip="Religion supreme deity" class="religionDeity"
+          value="${r.deity || ""}" autocorrect="off" spellcheck="false" />
+      </div>
+      <div data-col="area">
+        <span data-tip="Religion area" style="padding-right: 4px" class="icon-map-o"></span>
+        <div data-tip="Religion area" class="religionArea">${si(area) + unit}</div>
+      </div>
+      <div data-col="population">
+        <span data-tip="${populationTip}" class="icon-male"></span>
+        <div data-tip="${populationTip}" class="religionPopulation pointer">${si(population)}</div>
+      </div>
       ${getExpansionColumns(r)}
-      <span data-tip="Locate the religion" class="icon-target hide"></span>
-      <span data-tip="Lock this religion" class="icon-lock${r.lock ? "" : "-open"} hide"></span>
-      <span data-tip="Remove religion" class="icon-trash-empty hide"></span>
+      <div data-col="actions">
+        <span data-tip="Locate the religion" class="icon-target"></span>
+        <span data-tip="Lock this religion" class="icon-lock${r.lock ? "" : "-open"}"></span>
+        <span data-tip="Remove religion" class="icon-trash-empty"></span>
+      </div>
     </div>`;
   }
-  ensureEl("religionsBody").innerHTML = lines;
+  const body = ensureEl("religionsBody");
+  body.querySelectorAll(":scope > .states").forEach(row => {
+    row.remove();
+  });
+  body.insertAdjacentHTML("beforeend", lines);
 
   // update footer
   const validReligions = pack.religions.filter(r => r.i && !r.removed);
@@ -254,61 +343,61 @@ function religionsEditorAddLines(): void {
   ensureEl("religionsFooterArea").dataset.area = String(totalArea);
   ensureEl("religionsFooterPopulation").dataset.population = String(totalPopulation);
 
+  renderEditorPagination(ensureEl("religionsFooter"), view, religionsTable.goto);
+
   // add listeners
   ensureEl("religionsBody")
-    .querySelectorAll(":scope > div")
+    .querySelectorAll(":scope > .states")
     .forEach($line => {
-      $line.on("mouseenter", religionHighlightOn);
-      $line.on("mouseleave", religionHighlightOff);
-      $line.on("click", selectReligionOnLineClick);
+      $line.addEventListener("mouseenter", religionHighlightOn);
+      $line.addEventListener("mouseleave", religionHighlightOff);
     });
   ensureEl("religionsBody")
     .querySelectorAll("fill-box")
-    .forEach(el => void el.on("click", religionChangeColor));
+    .forEach(el => void el.addEventListener("click", religionChangeColor));
   ensureEl("religionsBody")
     .querySelectorAll("div > input.religionName")
-    .forEach(el => void el.on("input", religionChangeName));
+    .forEach(el => void el.addEventListener("input", religionChangeName));
   ensureEl("religionsBody")
     .querySelectorAll("div > select.religionType")
-    .forEach(el => void el.on("change", religionChangeType));
+    .forEach(el => void el.addEventListener("change", religionChangeType));
   ensureEl("religionsBody")
     .querySelectorAll("div > input.religionForm")
-    .forEach(el => void el.on("input", religionChangeForm));
+    .forEach(el => void el.addEventListener("input", religionChangeForm));
   ensureEl("religionsBody")
     .querySelectorAll("div > input.religionDeity")
-    .forEach(el => void el.on("input", religionChangeDeity));
+    .forEach(el => void el.addEventListener("input", religionChangeDeity));
   ensureEl("religionsBody")
     .querySelectorAll("div > span.icon-arrows-cw")
-    .forEach(el => void el.on("click", regenerateDeity));
+    .forEach(el => void el.addEventListener("click", regenerateDeity));
   ensureEl("religionsBody")
     .querySelectorAll("div > div.religionPopulation")
-    .forEach(el => void el.on("click", changePopulation));
+    .forEach(el => void el.addEventListener("click", changePopulation));
   ensureEl("religionsBody")
     .querySelectorAll("div > select.religionExtent")
-    .forEach(el => void el.on("change", religionChangeExtent));
+    .forEach(el => void el.addEventListener("change", religionChangeExtent));
   ensureEl("religionsBody")
     .querySelectorAll("div > input.religionExpantion")
-    .forEach(el => void el.on("change", religionChangeExpansionism));
+    .forEach(el => void el.addEventListener("change", religionChangeExpansionism));
   ensureEl("religionsBody")
     .querySelectorAll("div > span.icon-trash-empty")
-    .forEach(el => void el.on("click", religionRemovePrompt));
+    .forEach(el => void el.addEventListener("click", religionRemovePrompt));
   ensureEl("religionsBody")
     .querySelectorAll("div > span.icon-target")
-    .forEach($el => void $el.on("click", highlightReligion));
+    .forEach($el => void $el.addEventListener("click", highlightReligion));
   ensureEl("religionsBody")
     .querySelectorAll("div > span.icon-lock")
-    .forEach($el => void $el.on("click", updateLockStatus));
+    .forEach($el => void $el.addEventListener("click", updateLockStatus));
   ensureEl("religionsBody")
     .querySelectorAll("div > span.icon-lock-open")
-    .forEach($el => void $el.on("click", updateLockStatus));
+    .forEach($el => void $el.addEventListener("click", updateLockStatus));
 
   if (ensureEl("religionsBody").dataset.type === "percentage") {
     ensureEl("religionsBody").dataset.type = "absolute";
     togglePercentageMode();
   }
 
-  applySorting(ensureEl("religionsHeader"));
-  $("#religionsEditor").dialog({ width: "fit-content" });
+  updateDialog(dialogId, { width: "fit-content", position });
 }
 
 function getTypeOptions(type: string): string {
@@ -325,27 +414,35 @@ function getExpansionColumns(r: any): string {
     const folkTip =
       "Folk religions are not competitive and do not expand. Initially they cover all cells of their parent culture, but get ousted by organized religions when they expand";
     return /* html */ `
-      <span data-tip="${folkTip}" class="icon-resize-full-alt hide" style="padding-right: 2px"></span>
-      <span data-tip="${folkTip}" class="religionExtent hide" style="width: 5em">culture</span>
-      <span data-tip="${folkTip}" class="icon-resize-full hide"></span>
-      <input data-tip="${folkTip}" class="religionExpantion hide" disabled type="number" value='0' />`;
+      <div data-col="expansion">
+        <span data-tip="${folkTip}" class="icon-resize-full-alt" style="padding-right: 2px"></span>
+        <span data-tip="${folkTip}" class="religionExtent">culture</span>
+      </div>
+      <div data-col="expansionism">
+        <span data-tip="${folkTip}" class="icon-resize-full"></span>
+        <input data-tip="${folkTip}" class="religionExpantion" disabled type="number" value='0' />
+      </div>`;
   }
 
   return /* html */ `
-    <span data-tip="Potential religion extent" class="icon-resize-full-alt hide" style="padding-right: 2px"></span>
-    <select data-tip="Potential religion extent" class="religionExtent hide" style="width: 5em">
-      ${getExtentOptions(r.expansion)}
-    </select>
-    <span data-tip="Religion expansionism. Defines competitive size" class="icon-resize-full hide"></span>
-    <input
-      data-tip="Religion expansionism. Defines competitive size. Click to change, then click Recalculate to apply change"
-      class="religionExpantion hide"
-      type="number"
-      min="0"
-      max="99"
-      step=".1"
-      value=${r.expansionism}
-    />`;
+    <div data-col="expansion">
+      <span data-tip="Potential religion extent" class="icon-resize-full-alt" style="padding-right: 2px"></span>
+      <select data-tip="Potential religion extent" class="religionExtent">
+        ${getExtentOptions(r.expansion)}
+      </select>
+    </div>
+    <div data-col="expansionism">
+      <span data-tip="Religion expansionism. Defines competitive size" class="icon-resize-full"></span>
+      <input
+        data-tip="Religion expansionism. Defines competitive size. Click to change, then click Recalculate to apply change"
+        class="religionExpantion"
+        type="number"
+        min="0"
+        max="99"
+        step=".1"
+        value=${r.expansionism}
+      />
+    </div>`;
 }
 
 function getExtentOptions(type: string): string {
@@ -362,7 +459,7 @@ const religionHighlightOn = debounce((event: any) => {
   const $el = ensureEl("religionsBody").querySelector(`div[data-id='${religionId}']`);
   if ($el) $el.classList.add("active");
 
-  if (!layerIsOn("toggleReligions")) return;
+  if (!Layers.isOn("religions")) return;
   if (customization) return;
 
   const animate = transition().duration(2000).ease(easeSinIn);
@@ -428,22 +525,24 @@ function religionChangeForm(this: HTMLInputElement): void {
 }
 
 function religionChangeDeity(this: HTMLInputElement): void {
-  const religionId = +(this.parentNode as HTMLElement).dataset.id!;
-  (this.parentNode as HTMLElement).dataset.deity = this.value;
+  const row = this.closest(".states") as HTMLElement;
+  const religionId = +row.dataset.id!;
+  row.dataset.deity = this.value;
   pack.religions[religionId].deity = this.value;
 }
 
 function regenerateDeity(this: HTMLElement): void {
-  const religionId = +(this.parentNode as HTMLElement).dataset.id!;
+  const row = this.closest(".states") as HTMLElement;
+  const religionId = +row.dataset.id!;
   const cultureId = pack.religions[religionId].culture;
   const deity = Religions.getDeityName(cultureId) ?? "";
-  (this.parentNode as HTMLElement).dataset.deity = deity;
+  row.dataset.deity = deity;
   pack.religions[religionId].deity = deity;
   (this.nextElementSibling as HTMLInputElement).value = deity;
 }
 
 function changePopulation(this: HTMLElement): void {
-  const religionId = +(this.parentNode as HTMLElement).dataset.id!;
+  const religionId = +(this.closest(".states") as HTMLElement).dataset.id!;
   const religion = pack.religions[religionId];
   if (!religion.cells) {
     tip("Religion does not have any cells, cannot change population", false, "error");
@@ -530,21 +629,23 @@ function changePopulation(this: HTMLElement): void {
       });
     }
 
-    if (layerIsOn("togglePopulation")) drawPopulation();
+    Layers.draw("population");
     refreshReligionsEditor();
   }
 }
 
 function religionChangeExtent(this: HTMLSelectElement): void {
-  const religion = +(this.parentNode as HTMLElement).dataset.id!;
-  (this.parentNode as HTMLElement).dataset.expansion = this.value;
+  const row = this.closest(".states") as HTMLElement;
+  const religion = +row.dataset.id!;
+  row.dataset.expansion = this.value;
   pack.religions[religion].expansion = this.value;
   recalculateReligions();
 }
 
 function religionChangeExpansionism(this: HTMLInputElement): void {
-  const religion = +(this.parentNode as HTMLElement).dataset.id!;
-  (this.parentNode as HTMLElement).dataset.expansionism = this.value;
+  const row = this.closest(".states") as HTMLElement;
+  const religion = +row.dataset.id!;
+  row.dataset.expansionism = this.value;
   pack.religions[religion].expansionism = +this.value;
   recalculateReligions();
 }
@@ -552,7 +653,7 @@ function religionChangeExpansionism(this: HTMLInputElement): void {
 function religionRemovePrompt(this: HTMLElement): void {
   if (customization) return;
 
-  const religionId = +(this.parentNode as HTMLElement).dataset.id!;
+  const religionId = +(this.closest(".states") as HTMLElement).dataset.id!;
   confirmationDialog({
     title: "Remove religion",
     message: "Are you sure you want to remove the religion? <br>This action cannot be reverted",
@@ -592,8 +693,7 @@ function drawReligionCenters(): void {
     .style("cursor", "move");
 
   let data = pack.religions.filter(r => r.i && r.center && !r.removed);
-  const showExtinct = ensureEl("religionsBody").dataset.extinct === "show";
-  if (!showExtinct) data = data.filter(r => (r.cells ?? 0) > 0);
+  if (!filterState.showExtinct) data = data.filter(r => (r.cells ?? 0) > 0);
 
   religionCenters
     .selectAll("circle")
@@ -626,7 +726,7 @@ function religionCenterDrag(this: any, event: any): void {
   function handleDrag(this: any, dragEvent: any) {
     const { x, y } = dragEvent;
     this.setAttribute("transform", `translate(${x0 + x},${y0 + y})`);
-    const cell = findCell(x, y);
+    const cell = Pack.findCell(x, y);
     if (cell == null || pack.cells.h[cell] < 20) return; // ignore dragging on water
 
     pack.religions[religionId].center = cell;
@@ -657,7 +757,7 @@ function togglePercentageMode(): void {
     const totalPopulation = +ensureEl("religionsFooterPopulation").dataset.population!;
 
     ensureEl("religionsBody")
-      .querySelectorAll<HTMLElement>(":scope > div")
+      .querySelectorAll<HTMLElement>(":scope > .states")
       .forEach($el => {
         const { area, population } = $el.dataset;
         $el.querySelector<HTMLElement>(".religionArea")!.innerText = `${rn((+area! / totalArea) * 100)}%`;
@@ -666,7 +766,7 @@ function togglePercentageMode(): void {
       });
   } else {
     ensureEl("religionsBody").dataset.type = "absolute";
-    religionsEditorAddLines();
+    religionsTable.refresh();
   }
 }
 
@@ -708,153 +808,42 @@ async function showHierarchy(): Promise<void> {
 }
 
 function toggleExtinct(): void {
-  ensureEl("religionsBody").dataset.extinct = ensureEl("religionsBody").dataset.extinct !== "show" ? "show" : "hide";
-  religionsEditorAddLines();
+  filterState.showExtinct = !filterState.showExtinct;
+  dialogState.set(dialogId, "filters", filterState);
+  syncFilterControls();
+  religionsTable.reset();
   drawReligionCenters();
 }
 
-function enterReligionsManualAssignent(): void {
-  if (!layerIsOn("toggleReligions")) toggleReligions();
-  customization = 7;
-  select("#relig").append("g").attr("id", "temp");
-  document.querySelectorAll<HTMLElement>("#religionsBottom > *").forEach(el => {
-    el.style.display = "none";
-  });
-  ensureEl("religionsManuallyButtons").style.display = "inline-block";
-  select("#debug").select("#religionCenters").style("display", "none");
-
-  ensureEl("religionsEditor")
-    .querySelectorAll(".hide")
-    .forEach(el => {
-      el.classList.add("hidden");
-    });
-  ensureEl("religionsFooter").style.display = "none";
-  ensureEl("religionsBody")
-    .querySelectorAll<HTMLElement>("div > input, select, span, svg")
-    .forEach(e => {
-      e.style.pointerEvents = "none";
-    });
-  $("#religionsEditor").dialog({ position: { my: "right top", at: "right-10 top+10", of: "svg" } });
-
-  tip("Click on religion to select, drag the circle to change religion", true);
-  select<SVGElement, unknown>("#viewbox")
-    .style("cursor", "crosshair")
-    .on("click", selectReligionOnMapClick)
-    .call(drag<SVGElement, unknown>().on("start", dragReligionBrush))
-    .on("touchmove mousemove", moveReligionBrush);
-
-  ensureEl("religionsBody").querySelector("div")?.classList.add("selected");
+function syncFilterControls(): void {
+  ensureEl("religionsBody").dataset.extinct = filterState.showExtinct ? "show" : "hide";
+  ensureEl("religionsExtinct").classList.toggle("active", filterState.showExtinct);
 }
 
-function selectReligionOnLineClick(this: HTMLElement): void {
-  if (customization !== 7) return;
-  const prev = ensureEl("religionsBody").querySelector("div.selected");
-  if (prev) prev.classList.remove("selected");
-  this.classList.add("selected");
-}
+function openPaintEditor(): void {
+  Layers.show("religions");
 
-function selectReligionOnMapClick(this: any, event: any): void {
-  const point = getPointer(event, this);
-  const i = findCell(point[0], point[1]);
-  if (pack.cells.h[i!] < 20) return;
-
-  const assigned = select("#relig").select("#temp").select(`polygon[data-cell='${i}']`);
-  const religion = assigned.size() ? +assigned.attr("data-religion") : pack.cells.religion[i!];
-
-  ensureEl("religionsBody").querySelector("div.selected")?.classList.remove("selected");
-  ensureEl("religionsBody").querySelector(`div[data-id='${religion}']`)?.classList.add("selected");
-}
-
-function dragReligionBrush(this: any, event: any): void {
-  const radius = +ensureEl<HTMLInputElement>("religionsBrush").value;
-
-  event.on("drag", (dragEvent: any) => {
-    if (!dragEvent.dx && !dragEvent.dy) return;
-    const [x, y] = getPointer(dragEvent, this);
-    moveCircle(x, y, radius);
-
-    const found = radius > 5 ? findAllCellsInRadius(x, y, radius, pack) : [findCell(x, y, radius)];
-    const selection = found.filter((i): i is number => i !== undefined && isLand(i, pack));
-    if (selection) changeReligionForSelection(selection);
+  void Controllers.PaintEditor.open({
+    title: "Paint Religions",
+    parentDialogId: dialogId,
+    onClose: open,
+    items: pack.religions
+      .filter(religion => !religion.removed && (!religion.i || religion.cells))
+      .map(religion => ({ id: religion.i, name: religion.name, color: religion.color || "#ffffff" })),
+    dontOverrideControl: true,
+    getValue: cell => pack.cells.religion[cell],
+    filterCell: cell => isLand(cell, pack),
+    onApply: applyReligionPaint
   });
 }
 
-// change religion within selection
-function changeReligionForSelection(selection: number[]): void {
-  const temp = select("#relig").select("#temp");
-  const selected = ensureEl("religionsBody").querySelector<HTMLElement>("div.selected")!;
-  const religionNew = +selected.dataset.id!;
-  const color = pack.religions[religionNew].color || "#ffffff";
-  const preventOverwrite = (document.getElementById("religionsManuallyProtect") as HTMLInputElement | null)?.checked;
-
-  selection.forEach(i => {
-    const exists = temp.select(`polygon[data-cell='${i}']`);
-    const religionOld = exists.size() ? +exists.attr("data-religion") : pack.cells.religion[i];
-    if (religionNew === religionOld) return;
-    if (preventOverwrite && religionOld) return;
-
-    // change of append new element
-    if (exists.size()) exists.attr("data-religion", religionNew).attr("fill", color);
-    else
-      temp
-        .append("polygon")
-        .attr("data-cell", i)
-        .attr("data-religion", religionNew)
-        .attr("points", getPackPolygon(i, pack))
-        .attr("fill", color);
-  });
-}
-
-function moveReligionBrush(this: any, event: any): void {
-  showMainTip();
-  const [x, y] = getPointer(event, this);
-  const radius = +ensureEl<HTMLInputElement>("religionsBrush").value;
-  moveCircle(x, y, radius);
-}
-
-function applyReligionsManualAssignent(): void {
-  const changed = select("#relig").select("#temp").selectAll<SVGPolygonElement, unknown>("polygon");
-  changed.each(function () {
-    const i = +this.dataset.cell!;
-    const r = +this.dataset.religion!;
-    pack.cells.religion[i] = r;
-  });
-
-  if (changed.size()) {
-    drawReligions();
-    refreshReligionsEditor();
+function applyReligionPaint(changes: ReadonlyMap<number, number>): void {
+  for (const [cell, religion] of changes) pack.cells.religion[cell] = religion;
+  if (changes.size) {
+    Layers.draw("religions");
+    if (document.getElementById(dialogId)) refreshReligionsEditor();
     drawReligionCenters();
   }
-  exitReligionsManualAssignment();
-}
-
-function exitReligionsManualAssignment(close?: string): void {
-  customization = 0;
-  select("#relig").select("#temp").remove();
-  removeCircle();
-  document.querySelectorAll<HTMLElement>("#religionsBottom > *").forEach(el => {
-    el.style.display = "inline-block";
-  });
-  ensureEl("religionsManuallyButtons").style.display = "none";
-
-  ensureEl("religionsEditor")
-    .querySelectorAll(".hide")
-    .forEach(el => {
-      el.classList.remove("hidden");
-    });
-  ensureEl("religionsFooter").style.display = "block";
-  ensureEl("religionsBody")
-    .querySelectorAll<HTMLElement>("div > input, select, span, svg")
-    .forEach(e => {
-      e.style.removeProperty("pointer-events");
-    });
-  if (!close) $("#religionsEditor").dialog({ position: { my: "right top", at: "right-10 top+10", of: "svg" } });
-
-  select("#debug").select("#religionCenters").style("display", null);
-  applyDefaultViewboxEvents();
-  clearMainTip();
-  const $selected = ensureEl("religionsBody").querySelector("div.selected");
-  if ($selected) $selected.classList.remove("selected");
 }
 
 function enterAddReligionMode(this: HTMLElement): void {
@@ -889,7 +878,7 @@ function exitAddReligionMode(): void {
 
 function addReligion(this: SVGElement, event: MouseEvent): void {
   const [x, y] = getPointer(event, this);
-  const center = findCell(x, y)!;
+  const center = Pack.findCell(x, y)!;
   if (pack.cells.h[center] < 20) {
     tip("You cannot place religion center into the water. Please click on a land cell", false, "error");
     return;
@@ -904,7 +893,7 @@ function addReligion(this: SVGElement, event: MouseEvent): void {
   if (event.shiftKey === false) exitAddReligionMode();
   Religions.add(center);
 
-  drawReligions();
+  Layers.draw("religions");
   refreshReligionsEditor();
   drawReligionCenters();
 }
@@ -912,16 +901,28 @@ function addReligion(this: SVGElement, event: MouseEvent): void {
 function downloadReligionsCsv(): void {
   const unit = getAreaUnit("2");
   const headers = `Id,Name,Color,Type,Form,Supreme Deity,Area ${unit},Believers,Origins,Potential,Expansionism`;
-  const lines = Array.from(ensureEl("religionsBody").querySelectorAll<HTMLElement>(":scope > div"));
-  const data = lines.map($line => {
-    const { id, name, color, type, form, deity, area, population, expansion, expansionism } = $line.dataset;
-    const deityText = `"${deity}"`;
-    const { origins } = pack.religions[+id!];
-    const originList = (origins || [])
-      .filter((origin: number) => origin)
-      .map((origin: number) => pack.religions[origin].name);
+  // export the full filtered set (all pages), not just the visible page
+  const data = religionsTable.view().all.map(r => {
+    const area = getArea(r.area ?? 0);
+    const population = rn((r.rural ?? 0) * populationRate + (r.urban ?? 0) * populationRate * urbanization);
+    const deityText = `"${r.deity || ""}"`;
+    const originList = (r.origins ?? [])
+      .filter((origin): origin is number => Boolean(origin))
+      .map(origin => pack.religions[origin].name);
     const originText = `"${originList.join(", ")}"`;
-    return [id, name, color, type, form, deityText, area, population, originText, expansion, expansionism].join(",");
+    return [
+      r.i,
+      r.name,
+      r.color ?? "",
+      r.type ?? "",
+      r.form ?? "",
+      deityText,
+      area,
+      population,
+      originText,
+      r.expansion ?? "",
+      r.i ? (r.expansionism ?? "") : ""
+    ].join(",");
   });
   const csvData = [headers].concat(data).join("\n");
 
@@ -930,7 +931,7 @@ function downloadReligionsCsv(): void {
 }
 
 function highlightReligion(this: HTMLElement): void {
-  const religionId = +(this.parentNode as HTMLElement).dataset.id!;
+  const religionId = +(this.closest(".states") as HTMLElement).dataset.id!;
   const el = select("#relig").select(`#religion${religionId}`).node() as Element | null;
   if (el) highlightElement(el, 4);
 }
@@ -938,7 +939,7 @@ function highlightReligion(this: HTMLElement): void {
 function updateLockStatus(this: HTMLElement): void {
   if (customization) return;
 
-  const religionId = +(this.parentNode as HTMLElement).dataset.id!;
+  const religionId = +(this.closest(".states") as HTMLElement).dataset.id!;
   const classList = this.classList;
   const r = pack.religions[religionId];
   r.lock = !r.lock;
@@ -952,15 +953,14 @@ function recalculateReligions(must?: boolean): void {
 
   Religions.recalculate();
 
-  drawReligions();
+  Layers.draw("religions");
   refreshReligionsEditor();
   drawReligionCenters();
 }
 
 function closeReligionsEditor(): void {
   select("#debug").select("#religionCenters").remove();
-  exitReligionsManualAssignment("close");
-  exitAddReligionMode();
+  if (customization === 8) exitAddReligionMode();
   $("#religionsEditor").dialog("destroy");
   ensureEl("religionsEditor").remove();
 }

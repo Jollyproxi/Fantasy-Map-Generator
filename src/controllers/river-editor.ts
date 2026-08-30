@@ -1,22 +1,25 @@
 import { drag, type Selection, select } from "d3";
-import { closeDialogs } from "@/components/dialog/dialog-helpers";
+import { closeDialogs, destroyDialog } from "@/components/dialog/dialog-helpers";
+import { Layers } from "@/components/layers";
 import { clearMainTip, tip } from "@/components/tooltips";
 import { Controllers } from "@/controllers";
 import type { River } from "@/generators/river-generator";
 import type { Point } from "@/generators/voronoi";
 import { speak } from "@/utils";
-import { destroyDialogIfExists, ensureEl, findEl, getPackPolygon, getPointer, getSegmentId, rand, rn } from "../utils";
+import { ensureEl, findEl, getPointer, getSegmentId, rand, rn } from "../utils";
 
 let selectedRiver: Selection<SVGElement, unknown, HTMLElement, unknown>;
+
+let isCellsLayerForced = false; // the cells layer is turned on for the editing mode
 
 function open(id: string): void {
   if (customization) return;
   if (findEl("riverEditor") && id === selectedRiver.attr("id")) return;
   closeDialogs(".stable");
-  if (!layerIsOn("toggleRivers")) toggleRivers();
+  Layers.show("rivers");
 
-  ensureEl("toggleCells").dataset.forced = String(+!layerIsOn("toggleCells"));
-  if (!layerIsOn("toggleCells")) toggleCells();
+  isCellsLayerForced = !Layers.isOn("cells");
+  Layers.show("cells");
 
   selectedRiver = select<SVGElement, unknown>(`#${id}`).on("click", addControlPoint);
 
@@ -45,7 +48,7 @@ function open(id: string): void {
 }
 
 function renderDialog(): void {
-  destroyDialogIfExists("riverEditor");
+  destroyDialog("riverEditor");
 
   const html = /* html */ `<div id="riverEditor" class="dialog">
     <div id="riverBody" style="padding-bottom: 0.3em">
@@ -100,19 +103,19 @@ function renderDialog(): void {
   ensureEl("dialogs").insertAdjacentHTML("beforeend", html);
 
   // add listeners — dropped together with the dialog HTML on close
-  ensureEl("riverCreateSelectingCells").on("click", openRiverCreator);
-  ensureEl("riverEditStyle").on("click", openRiverStyle);
-  ensureEl("riverElevationProfile").on("click", showRiverElevationProfile);
-  ensureEl("riverLegend").on("click", editRiverLegend);
-  ensureEl("riverRemove").on("click", removeRiver);
-  ensureEl("riverName").on("input", changeName);
-  ensureEl("riverNameSpeak").on("click", () => speak(ensureEl<HTMLInputElement>("riverName").value));
-  ensureEl("riverType").on("input", changeType);
-  ensureEl("riverNameCulture").on("click", generateNameCulture);
-  ensureEl("riverNameRandom").on("click", generateNameRandom);
-  ensureEl("riverMainstem").on("change", changeParent);
-  ensureEl("riverSourceWidth").on("input", changeSourceWidth);
-  ensureEl("riverWidthFactor").on("input", changeWidthFactor);
+  ensureEl("riverCreateSelectingCells").addEventListener("click", openRiverCreator);
+  ensureEl("riverEditStyle").addEventListener("click", openRiverStyle);
+  ensureEl("riverElevationProfile").addEventListener("click", showRiverElevationProfile);
+  ensureEl("riverLegend").addEventListener("click", editRiverLegend);
+  ensureEl("riverRemove").addEventListener("click", removeRiver);
+  ensureEl("riverName").addEventListener("input", changeName);
+  ensureEl("riverNameSpeak").addEventListener("click", () => speak(ensureEl<HTMLInputElement>("riverName").value));
+  ensureEl("riverType").addEventListener("input", changeType);
+  ensureEl("riverNameCulture").addEventListener("click", generateNameCulture);
+  ensureEl("riverNameRandom").addEventListener("click", generateNameRandom);
+  ensureEl("riverMainstem").addEventListener("change", changeParent);
+  ensureEl("riverSourceWidth").addEventListener("input", changeSourceWidth);
+  ensureEl("riverWidthFactor").addEventListener("input", changeWidthFactor);
 }
 
 function openRiverCreator(): void {
@@ -192,7 +195,7 @@ function drawCells(cells: number[]): void {
     .selectAll(`polygon`)
     .data(validCells)
     .join("polygon")
-    .attr("points", (d: number) => getPackPolygon(d, pack));
+    .attr("points", (d: number) => String(Pack.getPolygon(d)));
 }
 
 function dragControlPoint(event: any): void {
@@ -200,13 +203,13 @@ function dragControlPoint(event: any): void {
   const river = getRiver();
 
   const { x: x0, y: y0 } = event;
-  const initCell = findCell(x0, y0);
+  const initCell = Pack.findCell(x0, y0);
 
   let movedToCell: number | null = null;
 
   event.on("drag", function (this: any, dragEvent: any) {
     const { x, y } = dragEvent;
-    const currentCell = findCell(x, y);
+    const currentCell = Pack.findCell(x, y);
 
     movedToCell = initCell !== currentCell ? currentCell! : null;
 
@@ -233,13 +236,14 @@ function dragControlPoint(event: any): void {
 function redrawRiver(): void {
   const river = getRiver();
   river.points = select("#controlPoints").selectAll("*").data() as Point[];
-  river.cells = river.points.map(([x, y]) => findCell(x, y)!);
+  river.cells = river.points.map(([x, y]) => Pack.findCell(x, y)!);
 
   const meanderedPoints = Rivers.addMeandering(river.cells, river.points);
   const path = Rivers.getRiverPath(meanderedPoints, river.widthFactor, river.sourceWidth);
   selectedRiver.attr("d", path);
 
   updateRiverLength(river);
+  Layers.draw("labels");
   if (findEl("elevationProfile")) showRiverElevationProfile();
 }
 
@@ -304,7 +308,7 @@ function changeWidthFactor(this: HTMLInputElement): void {
 }
 
 function showRiverElevationProfile(): void {
-  const points = (select("#controlPoints").selectAll("*").data() as Point[]).map(([x, y]) => findCell(x, y)!);
+  const points = (select("#controlPoints").selectAll("*").data() as Point[]).map(([x, y]) => Pack.findCell(x, y)!);
   const river = getRiver();
   const riverLen = rn(river.length * distanceScale);
   void Controllers.ElevationProfile.open(points, riverLen, true);
@@ -328,6 +332,7 @@ function removeRiver(): void {
         const river = +selectedRiver.attr("id").slice(5);
         Rivers.remove(river);
         selectedRiver.remove();
+        Layers.draw("labels");
         $("#riverEditor").dialog("close");
       },
       Cancel: function (this: any) {
@@ -344,11 +349,10 @@ function closeRiverEditor(): void {
   selectedRiver.on("click", null);
   clearMainTip();
 
-  const forced = +ensureEl("toggleCells").dataset.forced!;
-  ensureEl("toggleCells").dataset.forced = "0";
-  if (forced && layerIsOn("toggleCells")) toggleCells();
+  if (isCellsLayerForced) Layers.hide("cells");
+  isCellsLayerForced = false;
 
-  destroyDialogIfExists("riverEditor");
+  destroyDialog("riverEditor");
 }
 
 export const RiverEditor = { open };

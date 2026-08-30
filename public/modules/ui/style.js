@@ -18,9 +18,12 @@
 }
 
 // store some style inputs as options
-styleElements.on("change", function (ev) {
+styleElements.addEventListener("input", storeStyleOption);
+styleElements.addEventListener("change", storeStyleOption);
+
+function storeStyleOption(ev) {
   if (ev.target.dataset.stored) lock(ev.target.dataset.stored);
-});
+}
 
 // select element to be edited
 function editStyle(element, group) {
@@ -61,7 +64,8 @@ function addCustomColorScheme(scheme) {
   ensureEl("styleHeightmapScheme").options.add(new Option(scheme, scheme, false, true));
 }
 
-function getColorScheme(scheme = "bright") {
+function getColorScheme(scheme) {
+  if (!scheme) scheme = "bright";
   if (!(scheme in heightmapColorSchemes)) {
     const colors = scheme.split(",");
     heightmapColorSchemes[scheme] = d3.scaleSequential(d3.interpolateRgbBasis(colors));
@@ -75,7 +79,7 @@ function getColor(value, scheme = getColorScheme("bright")) {
 }
 
 // Toggle style sections on element select
-styleElementSelect.on("change", selectStyleElement);
+styleElementSelect.addEventListener("change", selectStyleElement);
 
 function selectStyleElement() {
   const styleElement = styleElementSelect.value;
@@ -91,7 +95,12 @@ function selectStyleElement() {
   if (["anchors", "borders", "burgIcons", "coastline", "lakes", "labels", "routes", "terrs"].includes(styleElement)) {
     const group = styleGroupSelect.value;
     const defaultGroupSelector = styleElement === "terrs" ? "#landHeights" : "g";
-    el = group && el.select("#" + group).size() ? el.select("#" + group) : el.select(defaultGroupSelector);
+    if (styleElement === "labels") {
+      const selected = group && el.select(`[data-group="${CSS.escape(group)}"]`);
+      el = selected && selected.size() ? selected : el.select(defaultGroupSelector);
+    } else {
+      el = group && el.select("#" + group).size() ? el.select("#" + group) : el.select(defaultGroupSelector);
+    }
   }
 
   // opacity
@@ -122,6 +131,7 @@ function selectStyleElement() {
       "coastline",
       "coordinates",
       "cults",
+      "goods",
       "gridOverlay",
       "ice",
       "icons",
@@ -200,7 +210,7 @@ function selectStyleElement() {
 
   if (styleElement === "markers") {
     styleMarkers.style.display = "block";
-    styleRescaleMarkers.checked = +markers.attr("rescale");
+    styleRescaleMarkers.checked = +d3.select("#markers").attr("rescale");
   }
 
   if (styleElement === "gridOverlay") {
@@ -214,7 +224,7 @@ function selectStyleElement() {
 
   if (styleElement === "compass") {
     styleCompass.style.display = "block";
-    const tr = parseTransform(compass.select("use").attr("transform"));
+    const tr = parseTransform(d3.select("#compass").select("use").attr("transform"));
     styleCompassShiftX.value = tr[0];
     styleCompassShiftY.value = tr[1];
     styleCompassSizeInput.value = tr[2];
@@ -222,17 +232,19 @@ function selectStyleElement() {
 
   if (styleElement === "terrain") {
     styleRelief.style.display = "block";
-    styleReliefSize.value = terrain.attr("size") || 1;
-    styleReliefDensity.value = terrain.attr("density") || 0.4;
-    styleReliefSet.value = terrain.attr("set");
+    styleReliefSize.value = style.relief.size;
+    styleReliefDensity.value = style.relief.density;
+    styleReliefSet.value = style.relief.set;
   }
 
   if (styleElement === "population") {
     stylePopulation.style.display = "block";
-    stylePopulationRuralStrokeInput.value = stylePopulationRuralStrokeOutput.value = population
+    stylePopulationRuralStrokeInput.value = stylePopulationRuralStrokeOutput.value = d3
+      .select("#population")
       .select("#rural")
       .attr("stroke");
-    stylePopulationUrbanStrokeInput.value = stylePopulationUrbanStrokeOutput.value = population
+    stylePopulationUrbanStrokeInput.value = stylePopulationUrbanStrokeOutput.value = d3
+      .select("#population")
       .select("#urban")
       .attr("stroke");
     styleStrokeWidth.style.display = "block";
@@ -241,21 +253,17 @@ function selectStyleElement() {
 
   if (styleElement === "regions") {
     styleStates.style.display = "block";
-    styleStatesBodyOpacity.value = statesBody.attr("opacity") || 1;
-    styleStatesBodyFilter.value = statesBody.attr("filter") || "";
-    styleStatesHaloWidth.value = statesHalo.attr("data-width") || 10;
-    styleStatesHaloOpacity.value = statesHalo.attr("opacity") || 1;
-    styleStatesHaloBlur.value = parseFloat(statesHalo.attr("filter")?.match(/blur\(([^)]+)\)/)?.[1]) || 0;
-  }
-
-  if (styleElement === "provs") {
-    styleFill.style.display = "block";
-    styleSize.style.display = "block";
-    styleFillInput.value = styleFillOutput.value = el.attr("fill") || "#111111";
-
-    styleFont.style.display = "block";
-    styleSelectFont.value = el.attr("font-family");
-    styleFontSize.value = el.attr("font-size");
+    styleStatesBodyOpacity.value = d3.select("#statesBody").attr("opacity") || 1;
+    styleStatesBodyFilter.value = d3.select("#statesBody").attr("filter") || "";
+    styleStatesHaloWidth.value = d3.select("#statesHalo").attr("data-width") || 10;
+    styleStatesHaloOpacity.value = d3.select("#statesHalo").attr("opacity") || 1;
+    styleStatesHaloBlur.value =
+      parseFloat(
+        d3
+          .select("#statesHalo")
+          .attr("filter")
+          ?.match(/blur\(([^)]+)\)/)?.[1]
+      ) || 0;
   }
 
   if (styleElement === "labels") {
@@ -266,23 +274,19 @@ function selectStyleElement() {
 
     styleShadow.style.display = "block";
     styleSize.style.display = "block";
-    styleVisibility.style.display = "block";
     styleFillInput.value = styleFillOutput.value = el.attr("fill") || "#3e3e4b";
     styleStrokeInput.value = styleStrokeOutput.value = el.attr("stroke") || "#3a3a3a";
     styleStrokeWidthInput.value = el.attr("stroke-width") || 0;
     styleLetterSpacingInput.value = el.attr("letter-spacing") || 0;
     styleShadowInput.value = el.style("text-shadow") || "";
-    styleLabelsHideGroup.checked = el.node().style.display === "none";
 
     styleFont.style.display = "block";
     styleSelectFont.value = el.attr("font-family");
-    styleFontSize.value = el.attr("data-size");
+    styleFontSize.value = parseFloat(el.attr("font-size")) || 18;
 
-    if (el.node().parentNode.id === "burgLabels") {
-      styleFontShift.style.display = "block";
-      styleFontShiftX.value = el.attr("data-dx") || 0;
-      styleFontShiftY.value = el.attr("data-dy") || 0;
-    }
+    styleFontShift.style.display = "block";
+    styleFontShiftX.value = el.attr("data-dx") || 0;
+    styleFontShiftY.value = el.attr("data-dy") || 0;
   }
 
   if (styleElement === "burgIcons") {
@@ -335,10 +339,10 @@ function selectStyleElement() {
 
   if (styleElement === "ocean") {
     styleOcean.style.display = "block";
-    styleOceanFill.value = styleOceanFillOutput.value = oceanLayers.select("#oceanBase").attr("fill");
+    styleOceanFill.value = styleOceanFillOutput.value = d3.select("#oceanLayers").select("#oceanBase").attr("fill");
     styleOceanPattern.value = ensureEl("oceanicPattern").getAttribute("href");
     styleOceanPatternOpacity.value = ensureEl("oceanicPattern").getAttribute("opacity") || 1;
-    outlineLayers.value = oceanLayers.attr("layers");
+    outlineLayers.value = d3.select("#oceanLayers").attr("layers");
   }
 
   if (styleElement === "temperature") {
@@ -378,9 +382,10 @@ function selectStyleElement() {
     styleEmblems.style.display = "block";
     styleStrokeWidth.style.display = "block";
     styleStrokeWidthInput.value = el.attr("stroke-width") || 1;
-    emblemsStateSizeInput.value = emblems.select("#stateEmblems").attr("data-size") || 1;
-    emblemsProvinceSizeInput.value = emblems.select("#provinceEmblems").attr("data-size") || 1;
-    emblemsBurgSizeInput.value = emblems.select("#burgEmblems").attr("data-size") || 1;
+    emblemsStateSizeInput.value = d3.select("#emblems").select("#stateEmblems").attr("data-size") || 1;
+    emblemsProvinceSizeInput.value = d3.select("#emblems").select("#provinceEmblems").attr("data-size") || 1;
+    emblemsBurgSizeInput.value = d3.select("#emblems").select("#burgEmblems").attr("data-size") || 1;
+    showAllEmblems.checked = options.emblems.showAll;
   }
 
   if (styleElement === "goodsIcons") {
@@ -413,23 +418,25 @@ function selectStyleElement() {
   // update group options
   styleGroupSelect.options.length = 0; // remove all options
   if (["anchors", "borders", "burgIcons", "coastline", "lakes", "labels", "routes", "terrs"].includes(styleElement)) {
-    const groups = ensureEl(styleElement).querySelectorAll("g");
-    groups.forEach(el => {
-      if (el.id === "burgLabels") return; // skip the container; its subgroups (capital, town, ...) are listed individually
-      const option = new Option(`${el.id} (${el.childElementCount})`, el.id, false, false);
-      styleGroupSelect.options.add(option);
-    });
-    styleGroupSelect.value = el.attr("id");
+    if (styleElement === "labels") {
+      options.labels.groups.forEach(group => {
+        const groupElement = ensureEl("labels").querySelector(`[data-group="${CSS.escape(group.name)}"]`);
+        const count = groupElement?.childElementCount || 0;
+        styleGroupSelect.options.add(new Option(`${group.name} (${count})`, group.name, false, false));
+      });
+      styleGroupSelect.value = el.attr("data-group");
+    } else {
+      const groups = ensureEl(styleElement).querySelectorAll("g");
+      groups.forEach(el => {
+        const option = new Option(`${el.id} (${el.childElementCount})`, el.id, false, false);
+        styleGroupSelect.options.add(option);
+      });
+      styleGroupSelect.value = el.attr("id");
+    }
     styleGroup.style.display = "block";
   } else {
     styleGroupSelect.options.add(new Option(styleElement, styleElement, false, true));
     styleGroup.style.display = "none";
-  }
-
-  if (styleElement === "coastline" && styleGroupSelect.value === "sea_island") {
-    styleCoastline.style.display = "block";
-    const auto = (styleCoastlineAuto.checked = coastline.select("#sea_island").attr("auto-filter"));
-    if (auto) styleFilter.style.display = "none";
   }
 
   if (styleElement === "scaleBar") {
@@ -473,76 +480,98 @@ function selectStyleElement() {
 }
 
 // Handle style inputs change
-styleGroupSelect.on("change", selectStyleElement);
+styleGroupSelect.addEventListener("change", selectStyleElement);
 
 function getEl() {
   const el = styleElementSelect.value;
   const g = styleGroupSelect.value;
-  if (g === el || g === "") return svg.select("#" + el);
-  else return svg.select("#" + el).select("#" + g);
+  const map = d3.select("#map");
+  if (g === el || g === "") return map.select("#" + el);
+  if (el === "labels") return map.select("#labels").select(`[data-group="${CSS.escape(g)}"]`);
+  else return map.select("#" + el).select("#" + g);
 }
 
-styleFillInput.on("input", function () {
+function updateLabelGroupInlineStyle(group) {
+  const groupStyle = style.labels.groups[styleGroupSelect.value];
+  if (!groupStyle) return;
+
+  const inlineStyle = group.node().style;
+  const value = Array.from(inlineStyle)
+    .filter(property => property !== "transform")
+    .map(property => `${property}: ${inlineStyle.getPropertyValue(property)}`)
+    .join("; ");
+
+  if (value) groupStyle.style = value;
+  else delete groupStyle.style;
+}
+
+styleFillInput.addEventListener("input", function () {
   styleFillOutput.value = this.value;
   getEl().attr("fill", this.value);
+  const groupStyle = style.labels.groups[styleGroupSelect.value];
+  if (groupStyle) groupStyle.fill = this.value;
 });
 
-styleStrokeInput.on("input", function () {
+styleStrokeInput.addEventListener("input", function () {
   styleStrokeOutput.value = this.value;
   getEl().attr("stroke", this.value);
-  if (styleElementSelect.value === "gridOverlay" && layerIsOn("toggleGrid")) drawGrid();
+  const groupStyle = style.labels.groups[styleGroupSelect.value];
+  if (groupStyle) groupStyle.stroke = this.value;
+  if (styleElementSelect.value === "gridOverlay") Layers.draw("grid");
 });
 
-// measurers are rendered with baked-in sizes, so a style change requires a redraw
-function redrawMeasurersOnStyleChange() {
-  if (styleElementSelect.value === "ruler" && layerIsOn("toggleRulers")) drawMeasurers();
-}
-
-styleStrokeWidthInput.on("input", e => {
+styleStrokeWidthInput.addEventListener("input", e => {
   getEl().attr("stroke-width", e.target.value);
-  if (styleElementSelect.value === "gridOverlay" && layerIsOn("toggleGrid")) drawGrid();
-  redrawMeasurersOnStyleChange();
+  const groupStyle = style.labels.groups[styleGroupSelect.value];
+  if (groupStyle) groupStyle["stroke-width"] = e.target.value;
+  if (styleElementSelect.value === "gridOverlay") Layers.draw("grid");
+  if (styleElementSelect.value === "ruler") Layers.draw("rulers");
 });
 
-styleLetterSpacingInput.on("input", e => {
+styleLetterSpacingInput.addEventListener("input", e => {
   getEl().attr("letter-spacing", e.target.value);
+  const groupStyle = style.labels.groups[styleGroupSelect.value];
+  if (groupStyle) groupStyle["letter-spacing"] = e.target.value;
 });
 
-styleStrokeDasharrayInput.on("input", function () {
+styleStrokeDasharrayInput.addEventListener("input", function () {
   getEl().attr("stroke-dasharray", this.value);
-  if (styleElementSelect.value === "gridOverlay" && layerIsOn("toggleGrid")) drawGrid();
-  redrawMeasurersOnStyleChange();
+  if (styleElementSelect.value === "gridOverlay") Layers.draw("grid");
+  if (styleElementSelect.value === "ruler") Layers.draw("rulers");
 });
 
-styleStrokeLinecapInput.on("change", function () {
+styleStrokeLinecapInput.addEventListener("change", function () {
   getEl().attr("stroke-linecap", this.value);
-  if (styleElementSelect.value === "gridOverlay" && layerIsOn("toggleGrid")) drawGrid();
+  if (styleElementSelect.value === "gridOverlay") Layers.draw("grid");
 });
 
-styleDisplayInput.on("change", function () {
+styleDisplayInput.addEventListener("change", function () {
   getEl().attr("display", this.value || null);
 });
 
-styleOpacityInput.on("input", e => {
+styleOpacityInput.addEventListener("input", e => {
   getEl().attr("opacity", e.target.value);
+  const groupStyle = style.labels.groups[styleGroupSelect.value];
+  if (groupStyle) groupStyle.opacity = e.target.value;
 });
 
-styleLabelsHideGroup.on("change", function () {
-  getEl().style("display", this.checked ? "none" : null);
-});
-
-styleFilterInput.on("change", function () {
-  if (styleGroupSelect.value === "ocean") return oceanLayers.attr("filter", this.value);
+styleFilterInput.addEventListener("change", function () {
+  if (styleGroupSelect.value === "ocean") return d3.select("#oceanLayers").attr("filter", this.value);
   getEl().attr("filter", this.value);
+  const groupStyle = style.labels.groups[styleGroupSelect.value];
+  if (groupStyle) {
+    if (this.value) groupStyle.filter = this.value;
+    else delete groupStyle.filter;
+  }
 });
 
-styleTextureInput.on("change", function () {
+styleTextureInput.addEventListener("change", function () {
   changeTexture(this.value);
 });
 
 function changeTexture(href) {
-  texture.attr("data-href", href);
-  texture.select("image").attr("href", href);
+  d3.select("#texture").attr("data-href", href);
+  d3.select("#texture").select("image").attr("href", href);
 }
 
 function updateTextureSelectValue(href) {
@@ -555,35 +584,35 @@ function updateTextureSelectValue(href) {
   }
 }
 
-styleTextureShiftX.on("input", function () {
-  texture.attr("data-x", this.value);
-  texture
+styleTextureShiftX.addEventListener("input", function () {
+  d3.select("#texture").attr("data-x", this.value);
+  d3.select("#texture")
     .select("image")
     .attr("x", this.value)
     .attr("width", graphWidth - this.valueAsNumber);
 });
 
-styleTextureShiftY.on("input", function () {
-  texture.attr("data-y", this.value);
-  texture
+styleTextureShiftY.addEventListener("input", function () {
+  d3.select("#texture").attr("data-y", this.value);
+  d3.select("#texture")
     .select("image")
     .attr("y", this.value)
     .attr("height", graphHeight - this.valueAsNumber);
 });
 
-styleClippingInput.on("change", function () {
+styleClippingInput.addEventListener("change", function () {
   getEl().attr("mask", this.value);
 });
 
-styleGridType.on("change", function () {
+styleGridType.addEventListener("change", function () {
   getEl().attr("type", this.value);
-  if (layerIsOn("toggleGrid")) drawGrid();
+  Layers.draw("grid");
   calculateFriendlyGridSize();
 });
 
-styleGridScale.on("input", function () {
+styleGridScale.addEventListener("input", function () {
   getEl().attr("scale", this.value);
-  if (layerIsOn("toggleGrid")) drawGrid();
+  Layers.draw("grid");
   calculateFriendlyGridSize();
 });
 
@@ -593,52 +622,45 @@ function calculateFriendlyGridSize() {
   styleGridSizeFriendly.value = friendly;
 }
 
-styleGridShiftX.on("input", function () {
+styleGridShiftX.addEventListener("input", function () {
   getEl().attr("dx", this.value);
-  if (layerIsOn("toggleGrid")) drawGrid();
+  Layers.draw("grid");
 });
 
-styleGridShiftY.on("input", function () {
+styleGridShiftY.addEventListener("input", function () {
   getEl().attr("dy", this.value);
-  if (layerIsOn("toggleGrid")) drawGrid();
+  Layers.draw("grid");
 });
 
-styleRescaleMarkers.on("change", function () {
-  markers.attr("rescale", +this.checked);
+styleRescaleMarkers.addEventListener("change", function () {
+  d3.select("#markers").attr("rescale", +this.checked);
   invokeActiveZooming();
 });
 
-styleCoastlineAuto.on("change", function () {
-  coastline.select("#sea_island").attr("auto-filter", +this.checked);
-  styleFilter.style.display = this.checked ? "none" : "block";
-  invokeActiveZooming();
-});
-
-styleOceanFill.on("input", function () {
-  oceanLayers.select("rect").attr("fill", this.value);
+styleOceanFill.addEventListener("input", function () {
+  d3.select("#oceanLayers").select("rect").attr("fill", this.value);
   styleOceanFillOutput.value = this.value;
 });
 
-styleOceanPattern.on("change", function () {
+styleOceanPattern.addEventListener("change", function () {
   ensureEl("oceanicPattern").setAttribute("href", this.value);
 });
 
-styleOceanPatternOpacity.on("input", e => {
+styleOceanPatternOpacity.addEventListener("input", e => {
   ensureEl("oceanicPattern").setAttribute("opacity", e.target.value);
 });
 
-outlineLayers.on("change", function () {
-  oceanLayers.selectAll("path").remove();
-  oceanLayers.attr("layers", this.value);
-  OceanLayers();
+outlineLayers.addEventListener("change", function () {
+  d3.select("#oceanLayers").attr("layers", this.value);
+  Layers.draw("ocean");
 });
 
-styleHeightmapScheme.on("change", function () {
+styleHeightmapScheme.addEventListener("change", function () {
   getEl().attr("scheme", this.value);
-  drawHeightmap();
+  Layers.draw("heightmap");
 });
 
-openCreateHeightmapSchemeButton.on("click", function () {
+openCreateHeightmapSchemeButton.addEventListener("click", function () {
   // start with current scheme
   const scheme = getEl().attr("scheme");
   this.dataset.stops = scheme.startsWith("#")
@@ -736,7 +758,7 @@ openCreateHeightmapSchemeButton.on("click", function () {
 
     addCustomColorScheme(stops);
     getEl().attr("scheme", stops);
-    drawHeightmap();
+    Layers.draw("heightmap");
 
     handleClose();
   }
@@ -757,125 +779,133 @@ openCreateHeightmapSchemeButton.on("click", function () {
   });
 });
 
-styleHeightmapRenderOcean.on("change", e => {
+styleHeightmapRenderOcean.addEventListener("change", e => {
   const checked = +e.target.checked;
   getEl().attr("data-render", checked);
-  drawHeightmap();
+  Layers.draw("heightmap");
 });
 
-styleHeightmapTerracing.on("input", e => {
+styleHeightmapTerracing.addEventListener("input", e => {
   getEl().attr("terracing", e.target.value);
-  drawHeightmap();
+  Layers.draw("heightmap");
 });
 
-styleHeightmapSkip.on("input", e => {
+styleHeightmapSkip.addEventListener("input", e => {
   getEl().attr("skip", e.target.value);
-  drawHeightmap();
+  Layers.draw("heightmap");
 });
 
-styleHeightmapSimplification.on("input", e => {
+styleHeightmapSimplification.addEventListener("input", e => {
   getEl().attr("relax", e.target.value);
-  drawHeightmap();
+  Layers.draw("heightmap");
 });
 
-styleHeightmapCurve.on("change", e => {
+styleHeightmapCurve.addEventListener("change", e => {
   getEl().attr("curve", e.target.value);
-  drawHeightmap();
+  Layers.draw("heightmap");
 });
 
-styleReliefSet.on("change", e => {
-  terrain.attr("set", e.target.value);
-  drawReliefIcons();
-  if (!layerIsOn("toggleRelief")) toggleRelief();
+styleReliefSet.addEventListener("change", e => {
+  style.relief.set = e.target.value;
+  Relief.changeSet(e.target.value);
+  Layers.draw("relief");
 });
 
-styleReliefSize.on("change", e => {
-  terrain.attr("size", e.target.value);
-  drawReliefIcons();
-  if (!layerIsOn("toggleRelief")) toggleRelief();
+styleReliefSize.addEventListener("change", e => {
+  const newSize = +e.target.value;
+  const ratio = newSize / style.relief.size;
+  style.relief.size = newSize;
+  if (ratio === 1) return;
+
+  Relief.changeSize(ratio);
+  Layers.draw("relief");
 });
 
-styleReliefDensity.on("change", e => {
-  terrain.attr("density", e.target.value);
-  drawReliefIcons();
-  if (!layerIsOn("toggleRelief")) toggleRelief();
+// density defines the placement, so it cannot be applied without regenerating the icons
+styleReliefDensity.addEventListener("change", e => {
+  style.relief.density = +e.target.value;
+  Relief.generate();
+  Layers.draw("relief");
 });
 
-styleTemperatureFillOpacityInput.on("input", e => {
-  temperature.attr("fill-opacity", e.target.value);
+styleTemperatureFillOpacityInput.addEventListener("input", e => {
+  d3.select("#temperature").attr("fill-opacity", e.target.value);
 });
 
-styleTemperatureFontSizeInput.on("input", e => {
-  temperature.attr("font-size", e.target.value + "px");
+styleTemperatureFontSizeInput.addEventListener("input", e => {
+  d3.select("#temperature").attr("font-size", e.target.value + "px");
 });
 
-styleTemperatureFillInput.on("input", e => {
-  temperature.attr("fill", e.target.value);
+styleTemperatureFillInput.addEventListener("input", e => {
+  d3.select("#temperature").attr("fill", e.target.value);
   styleTemperatureFillOutput.value = e.target.value;
 });
 
-stylePopulationRuralStrokeInput.on("input", e => {
-  population.select("#rural").attr("stroke", e.target.value);
+stylePopulationRuralStrokeInput.addEventListener("input", e => {
+  d3.select("#population").select("#rural").attr("stroke", e.target.value);
   stylePopulationRuralStrokeOutput.value = e.target.value;
 });
 
-stylePopulationUrbanStrokeInput.on("input", e => {
-  population.select("#urban").attr("stroke", e.target.value);
+stylePopulationUrbanStrokeInput.addEventListener("input", e => {
+  d3.select("#population").select("#urban").attr("stroke", e.target.value);
   stylePopulationUrbanStrokeOutput.value = e.target.value;
 });
 
-styleBurgIconsIcon.on("change", e => {
+styleBurgIconsIcon.addEventListener("change", e => {
   getEl().attr("data-icon", e.target.value).selectAll("use").attr("href", e.target.value);
 });
 
-styleBurgIconsIconSize.on("input", e => {
+styleBurgIconsIconSize.addEventListener("input", e => {
   getEl().attr("font-size", e.target.value);
 });
 
-styleBurgIconsStrokeLinejoin.on("change", e => {
+styleBurgIconsStrokeLinejoin.addEventListener("change", e => {
   getEl().attr("stroke-linejoin", e.target.value);
 });
 
-styleBurgIconsFillOpacity.on("input", e => {
+styleBurgIconsFillOpacity.addEventListener("input", e => {
   getEl().attr("fill-opacity", e.target.value);
 });
 
-styleCompassSizeInput.on("input", shiftCompass);
-styleCompassShiftX.on("input", shiftCompass);
-styleCompassShiftY.on("input", shiftCompass);
+styleCompassSizeInput.addEventListener("input", shiftCompass);
+styleCompassShiftX.addEventListener("input", shiftCompass);
+styleCompassShiftY.addEventListener("input", shiftCompass);
 
 function shiftCompass() {
   const tr = `translate(${styleCompassShiftX.value} ${styleCompassShiftY.value}) scale(${styleCompassSizeInput.value})`;
-  compass.select("use").attr("transform", tr);
+  d3.select("#compass").select("use").attr("transform", tr);
 }
 
-styleLegendColItems.on("input", e => {
-  legend.select("#legendBox").attr("data-columns", e.target.value);
-  redrawLegend();
+styleLegendColItems.addEventListener("input", e => {
+  d3.select("#legend").select("#legendBox").attr("data-columns", e.target.value);
+  Layers.draw("legend");
 });
 
-styleLegendBack.on("input", e => {
+styleLegendBack.addEventListener("input", e => {
   styleLegendBackOutput.value = e.target.value;
-  legend.select("#legendBox").attr("fill", e.target.value);
+  d3.select("#legend").select("#legendBox").attr("fill", e.target.value);
 });
 
-styleLegendOpacity.on("input", e => {
-  legend.select("#legendBox").attr("fill-opacity", e.target.value);
+styleLegendOpacity.addEventListener("input", e => {
+  d3.select("#legend").select("#legendBox").attr("fill-opacity", e.target.value);
 });
 
-styleSelectFont.on("change", changeFont);
+styleSelectFont.addEventListener("change", changeFont);
 function changeFont() {
   const family = styleSelectFont.value;
   getEl().attr("font-family", family);
+  const groupStyle = style.labels.groups[styleGroupSelect.value];
+  if (groupStyle) groupStyle["font-family"] = family;
 
-  if (styleElementSelect.value === "legend") redrawLegend();
+  if (styleElementSelect.value === "legend") Layers.draw("legend");
 }
 
-styleShadowInput.on("input", function () {
-  getEl().style("text-shadow", this.value);
+styleShadowInput.addEventListener("input", function () {
+  const group = getEl().style("text-shadow", this.value);
+  updateLabelGroupInlineStyle(group);
 });
 
-styleFontAdd.on("click", function () {
+styleFontAdd.addEventListener("click", function () {
   addFontNameInput.value = "";
   addFontURLInput.value = "";
 
@@ -912,20 +942,20 @@ styleFontAdd.on("click", function () {
   });
 });
 
-addFontMethod.on("change", function () {
+addFontMethod.addEventListener("change", function () {
   addFontURLInput.style.display = this.value === "fontURL" ? "inline" : "none";
 });
 
-styleFontSize.on("change", function () {
+styleFontSize.addEventListener("change", function () {
   changeFontSize(getEl(), +this.value);
 });
 
-styleFontPlus.on("click", function () {
+styleFontPlus.addEventListener("click", function () {
   const current = +styleFontSize.value || 12;
   changeFontSize(getEl(), Math.min(rn(current + 0.1, 1), 999));
 });
 
-styleFontMinus.on("click", function () {
+styleFontMinus.addEventListener("click", function () {
   const current = +styleFontSize.value || 12;
   changeFontSize(getEl(), Math.max(rn(current - 0.1, 1), 0.1));
 });
@@ -933,123 +963,131 @@ styleFontMinus.on("click", function () {
 function changeFontSize(el, size) {
   styleFontSize.value = size;
 
-  const getSizeOnScale = element => {
-    // some labels are rescaled on zoom
-    if (element === "labels") return Math.max(rn((size + size / scale) / 2, 2), 1);
-    if (element === "coordinates") return rn(size / scale ** 0.8, 2);
+  const groupStyle = style.labels.groups[styleGroupSelect.value];
+  if (styleElementSelect.value === "labels") {
+    el.attr("font-size", `${size}%`).attr("data-size", null);
+    if (groupStyle) {
+      delete groupStyle["data-size"];
+      groupStyle["font-size"] = `${size}%`;
+    }
+    return;
+  }
 
-    // other has the same size
-    return size;
-  };
-
-  const scaleSize = getSizeOnScale(styleElementSelect.value);
+  const scaleSize = styleElementSelect.value === "coordinates" ? rn(size / scale ** 0.8, 2) : size;
   el.attr("data-size", size).attr("font-size", scaleSize);
 
-  if (styleElementSelect.value === "legend") redrawLegend();
-  redrawMeasurersOnStyleChange();
+  if (styleElementSelect.value === "legend") Layers.draw("legend");
+  if (styleElementSelect.value === "ruler") Layers.draw("rulers");
 }
 
-styleFontShiftX.on("input", e => {
-  getEl()
-    .attr("data-dx", e.target.value)
-    .selectAll("text")
-    .attr("dx", e.target.value + "em");
+styleFontShiftX.addEventListener("input", e => {
+  const group = getEl().attr("data-dx", e.target.value);
+  const groupStyle = style.labels.groups[styleGroupSelect.value];
+  if (groupStyle) groupStyle["data-dx"] = e.target.value;
+  const dx = e.target.value || 0;
+  const dy = group.attr("data-dy") || 0;
+  group.style("transform", +dx || +dy ? `translate(${dx}em, ${dy}em)` : null);
 });
 
-styleFontShiftY.on("input", e => {
-  getEl()
-    .attr("data-dy", e.target.value)
-    .selectAll("text")
-    .attr("dy", e.target.value + "em");
+styleFontShiftY.addEventListener("input", e => {
+  const group = getEl().attr("data-dy", e.target.value);
+  const groupStyle = style.labels.groups[styleGroupSelect.value];
+  if (groupStyle) groupStyle["data-dy"] = e.target.value;
+  const dx = group.attr("data-dx") || 0;
+  const dy = e.target.value || 0;
+  group.style("transform", +dx || +dy ? `translate(${dx}em, ${dy}em)` : null);
 });
 
-styleStatesBodyOpacity.on("input", e => {
-  statesBody.attr("opacity", e.target.value);
+styleStatesBodyOpacity.addEventListener("input", e => {
+  d3.select("#statesBody").attr("opacity", e.target.value);
 });
 
-styleStatesBodyFilter.on("change", function () {
-  statesBody.attr("filter", this.value);
+styleStatesBodyFilter.addEventListener("change", function () {
+  d3.select("#statesBody").attr("filter", this.value);
 });
 
-styleStatesHaloWidth.on("input", e => {
+styleStatesHaloWidth.addEventListener("input", e => {
   const value = e.target.value;
-  statesHalo.attr("data-width", value).attr("stroke-width", value);
+  d3.select("#statesHalo").attr("data-width", value).attr("stroke-width", value);
 });
 
-styleStatesHaloOpacity.on("input", e => {
-  statesHalo.attr("opacity", e.target.value);
+styleStatesHaloOpacity.addEventListener("input", e => {
+  d3.select("#statesHalo").attr("opacity", e.target.value);
 });
 
-styleStatesHaloBlur.on("input", e => {
+styleStatesHaloBlur.addEventListener("input", e => {
   const value = Number(e.target.value);
   const blur = value > 0 ? `blur(${value}px)` : null;
-  statesHalo.attr("filter", blur);
+  d3.select("#statesHalo").attr("filter", blur);
 });
 
-styleArmiesFillOpacity.on("input", e => {
-  armies.attr("fill-opacity", e.target.value);
+styleArmiesFillOpacity.addEventListener("input", e => {
+  d3.select("#armies").attr("fill-opacity", e.target.value);
 });
 
-styleArmiesSize.on("input", e => {
+styleArmiesSize.addEventListener("input", e => {
   const value = Number(e.target.value);
-  armies.attr("box-size", value).attr("font-size", value * 2);
+  d3.select("#armies")
+    .attr("box-size", value)
+    .attr("font-size", value * 2);
 
-  armies.selectAll("g").remove(); // clear armies layer
-  pack.states.forEach(s => {
-    if (!s.i || s.removed || !s.military.length) return;
-    drawRegiments(s.military, s.i);
-  });
+  Layers.draw("military");
 });
 
-emblemsStateSizeInput.on("change", e => {
-  emblems.select("#stateEmblems").attr("data-size", e.target.value);
-  drawEmblems();
+emblemsStateSizeInput.addEventListener("change", e => {
+  d3.select("#emblems").select("#stateEmblems").attr("data-size", e.target.value);
+  Layers.draw("emblems");
 });
 
-emblemsProvinceSizeInput.on("change", e => {
-  emblems.select("#provinceEmblems").attr("data-size", e.target.value);
-  drawEmblems();
+emblemsProvinceSizeInput.addEventListener("change", e => {
+  d3.select("#emblems").select("#provinceEmblems").attr("data-size", e.target.value);
+  Layers.draw("emblems");
 });
 
-emblemsBurgSizeInput.on("change", e => {
-  emblems.select("#burgEmblems").attr("data-size", e.target.value);
-  drawEmblems();
+emblemsBurgSizeInput.addEventListener("change", e => {
+  d3.select("#emblems").select("#burgEmblems").attr("data-size", e.target.value);
+  Layers.draw("emblems");
+});
+
+showAllEmblems.addEventListener("change", e => {
+  options.emblems.showAll = e.target.checked;
+  invokeActiveZooming();
 });
 
 styleGoodsCircle.addEventListener("change", function () {
-  goods.select("#goodsIcons").attr("data-circle", +this.checked);
-  drawGoods();
+  d3.select("#goods").select("#goodsIcons").attr("data-circle", +this.checked);
+  Layers.draw("goods");
 });
 
-styleGoodsSize.on("change", function () {
-  goods.select("#goodsIcons").attr("data-size", this.value);
-  drawGoods();
+styleGoodsSize.addEventListener("change", function () {
+  d3.select("#goods").select("#goodsIcons").attr("data-size", this.value);
+  Layers.draw("goods");
 });
 
-styleGoodsBurgsSize.on("change", function () {
-  goods.select("#goodsBurgs").attr("data-size", this.value);
-  drawGoods();
+styleGoodsBurgsSize.addEventListener("change", function () {
+  d3.select("#goods").select("#goodsBurgs").attr("data-size", this.value);
+  Layers.draw("goods");
 });
 
-styleMarketsLayerFillOpacity.on("input", e => {
-  markets.attr("fill-opacity", e.target.value);
+styleMarketsLayerFillOpacity.addEventListener("input", e => {
+  d3.select("#markets").attr("fill-opacity", e.target.value);
 });
 
-styleMarketsSize.on("change", function () {
-  markets.attr("data-size", this.value);
-  drawMarketsLayer();
+styleMarketsSize.addEventListener("change", function () {
+  d3.select("#markets").attr("data-size", this.value);
+  Layers.draw("markets");
 });
 
-styleMarketsIconSize.on("change", function () {
-  markets.attr("font-size", this.value);
-  drawMarketsLayer();
+styleMarketsIconSize.addEventListener("change", function () {
+  d3.select("#markets").attr("font-size", this.value);
+  Layers.draw("markets");
 });
 
-styleMarketsIcon.on("click", function () {
-  window.Controllers.IconSelector.open(markets.attr("data-icon") || "⚖️", value => {
-    markets.attr("data-icon", value);
+styleMarketsIcon.addEventListener("click", function () {
+  window.Controllers.IconSelector.open(d3.select("#markets").attr("data-icon") || "⚖️", value => {
+    d3.select("#markets").attr("data-icon", value);
     this.innerHTML = value;
-    drawMarketsLayer();
+    Layers.draw("markets");
   });
 });
 
@@ -1103,7 +1141,7 @@ Object.keys(vignettePresets).forEach(preset => {
   styleVignettePreset.options.add(new Option(preset, preset, false, false));
 });
 
-styleVignettePreset.on("change", function () {
+styleVignettePreset.addEventListener("change", function () {
   const attributes = JSON.parse(vignettePresets[this.value]);
 
   for (const selector in attributes) {
@@ -1135,45 +1173,45 @@ styleVignettePreset.on("change", function () {
   }
 });
 
-styleVignetteX.on("input", e => {
+styleVignetteX.addEventListener("input", e => {
   ensureEl("vignette-rect").setAttribute("x", `${e.target.value}%`);
 });
 
-styleVignetteWidth.on("input", e => {
+styleVignetteWidth.addEventListener("input", e => {
   ensureEl("vignette-rect").setAttribute("width", `${e.target.value}%`);
 });
 
-styleVignetteY.on("input", e => {
+styleVignetteY.addEventListener("input", e => {
   ensureEl("vignette-rect").setAttribute("y", `${e.target.value}%`);
 });
 
-styleVignetteHeight.on("input", e => {
+styleVignetteHeight.addEventListener("input", e => {
   ensureEl("vignette-rect").setAttribute("height", `${e.target.value}%`);
 });
 
-styleVignetteRx.on("input", e => {
+styleVignetteRx.addEventListener("input", e => {
   ensureEl("vignette-rect").setAttribute("rx", `${e.target.value}%`);
 });
 
-styleVignetteRy.on("input", e => {
+styleVignetteRy.addEventListener("input", e => {
   ensureEl("vignette-rect").setAttribute("ry", `${e.target.value}%`);
 });
 
-styleVignetteBlur.on("input", e => {
+styleVignetteBlur.addEventListener("input", e => {
   ensureEl("vignette-rect").setAttribute("filter", `blur(${e.target.value}px)`);
 });
 
-styleScaleBar.on("input", function (event) {
-  const scaleBarBack = scaleBar.select("#scaleBarBack");
+styleScaleBar.addEventListener("input", function (event) {
+  const scaleBarBack = d3.select("#scaleBar").select("#scaleBarBack");
   if (!scaleBarBack.size()) return;
 
   const { id, value } = event.target;
 
-  if (id === "styleScaleBarSize") scaleBar.attr("data-bar-size", value);
-  else if (id === "styleScaleBarFontSize") scaleBar.attr("font-size", value);
-  else if (id === "styleScaleBarPositionX") scaleBar.attr("data-x", value);
-  else if (id === "styleScaleBarPositionY") scaleBar.attr("data-y", value);
-  else if (id === "styleScaleBarLabel") scaleBar.attr("data-label", value);
+  if (id === "styleScaleBarSize") d3.select("#scaleBar").attr("data-bar-size", value);
+  else if (id === "styleScaleBarFontSize") d3.select("#scaleBar").attr("font-size", value);
+  else if (id === "styleScaleBarPositionX") d3.select("#scaleBar").attr("data-x", value);
+  else if (id === "styleScaleBarPositionY") d3.select("#scaleBar").attr("data-y", value);
+  else if (id === "styleScaleBarLabel") d3.select("#scaleBar").attr("data-label", value);
   else if (id === "styleScaleBarBackgroundOpacity") scaleBarBack.attr("opacity", value);
   else if (id === "styleScaleBarBackgroundFill") scaleBarBack.attr("fill", value);
   else if (id === "styleScaleBarBackgroundStroke") scaleBarBack.attr("stroke", value);
@@ -1183,41 +1221,20 @@ styleScaleBar.on("input", function (event) {
   else if (id === "styleScaleBarBackgroundPaddingRight") scaleBarBack.attr("data-right", value);
   else if (id === "styleScaleBarBackgroundPaddingBottom") scaleBarBack.attr("data-bottom", value);
   else if (id === "styleScaleBarBackgroundPaddingLeft") scaleBarBack.attr("data-left", value);
-
-  if (
-    [
-      "styleScaleBarSize",
-      "styleScaleBarPositionX",
-      "styleScaleBarPositionY",
-      "styleScaleBarLabel",
-      "styleScaleBarBackgroundPaddingLeft",
-      "styleScaleBarBackgroundPaddingTop",
-      "styleScaleBarBackgroundPaddingRight",
-      "styleScaleBarBackgroundPaddingBottom"
-    ].includes(id)
-  ) {
-    drawScaleBar(scaleBar, scale);
-    fitScaleBar(scaleBar, svgWidth, svgHeight);
-  }
+  Layers.draw("scaleBar");
 });
 
-function updateElements() {
-  if (layerIsOn("toggleHeight")) drawHeightmap();
-  if (legend.selectAll("*").size() && window.redrawLegend) redrawLegend();
-  oceanLayers.selectAll("path").remove();
-  OceanLayers();
-  invokeActiveZooming();
-}
-
 // GLOBAL FILTERS
-mapFilters.on("click", applyMapFilter);
+mapFilters.addEventListener("click", applyMapFilter);
 function applyMapFilter(event) {
   if (event.target.tagName !== "BUTTON") return;
   const button = event.target;
-  svg.attr("data-filter", null).attr("filter", null);
+  d3.select("#map").attr("data-filter", null).attr("filter", null);
   if (button.classList.contains("pressed")) return button.classList.remove("pressed");
 
   mapFilters.querySelectorAll(".pressed").forEach(button => button.classList.remove("pressed"));
   button.classList.add("pressed");
-  svg.attr("data-filter", button.id).attr("filter", "url(#filter-" + button.id + ")");
+  d3.select("#map")
+    .attr("data-filter", button.id)
+    .attr("filter", "url(#filter-" + button.id + ")");
 }

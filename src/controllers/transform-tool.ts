@@ -1,5 +1,7 @@
+import { destroyDialog } from "@/components/dialog/dialog-helpers";
+import { Layers } from "@/components/layers";
 import { Resample } from "@/generators/resample";
-import { destroyDialogIfExists, ensureEl, rn } from "../utils";
+import { ensureEl, rn } from "../utils";
 
 let mouseIsDown = false;
 let mouseX = 0;
@@ -28,7 +30,7 @@ function open(): void {
 }
 
 function renderDialog(): void {
-  destroyDialogIfExists("transformTool");
+  destroyDialog("transformTool");
 
   const pointsValue = ensureEl<HTMLInputElement>("pointsInput").value;
   const cells = cellsDensityMap[+pointsValue];
@@ -85,7 +87,7 @@ function renderDialog(): void {
 }
 
 function addListeners(): void {
-  ensureEl("transformToolBody").on("input", handleInput);
+  ensureEl("transformToolBody").addEventListener("input", handleInput);
   ensureEl<HTMLInputElement>("transformPointsInput").oninput = handlePointsInput;
 
   const preview = ensureEl("transformPreview");
@@ -97,7 +99,7 @@ function addListeners(): void {
 
 function cleanup(): void {
   mouseIsDown = false;
-  destroyDialogIfExists("transformTool");
+  destroyDialog("transformTool");
 }
 
 async function loadPreview(): Promise<void> {
@@ -202,7 +204,7 @@ function transformMap(): void {
   undraw();
   Resample.process({ projection, inverse, scale: 1 });
 
-  drawLayers();
+  Layers.drawAll();
 
   INFO && console.groupEnd();
 }

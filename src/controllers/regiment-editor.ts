@@ -1,19 +1,20 @@
 import { type D3DragEvent, drag, easeSinInOut, select, sum, transition } from "d3";
-import { closeDialogs, refreshEditors } from "@/components/dialog/dialog-helpers";
+import { closeDialogs, destroyDialog, refreshEditors } from "@/components/dialog/dialog-helpers";
+import { Layers } from "@/components/layers";
 import { clearMainTip, tip } from "@/components/tooltips";
 import { applyDefaultViewboxEvents } from "@/components/viewbox-events";
 import { Controllers } from "@/controllers";
 import { drawRegiment, moveRegiment } from "@/renderers/draw-military";
 import { speak } from "@/utils";
 import type { Regiment } from "../generators/military-generator";
-import { capitalize, destroyDialogIfExists, ensureEl, getPointer, last, rn } from "../utils";
+import { capitalize, ensureEl, getPointer, last, rn } from "../utils";
 
 let selectedRegiment: SVGGElement | null = null;
 
 function editRegiment(selector: string): void {
   if (customization) return;
   closeDialogs(".stable");
-  if (!layerIsOn("toggleMilitary")) toggleMilitary();
+  Layers.show("military");
 
   const armies = select<SVGGElement, unknown>("#armies");
   armies.selectAll(":scope > g").classed("draggable", true);
@@ -38,7 +39,7 @@ function editRegiment(selector: string): void {
 }
 
 function renderDialog(): void {
-  destroyDialogIfExists("regimentEditor");
+  destroyDialog("regimentEditor");
   const editorHtml = /* html */ `<div id="regimentEditor" class="dialog">
     <div id="regimentBody" style="padding-bottom: 0.3em">
       <div style="padding-bottom: 0.2em">
@@ -331,7 +332,7 @@ function toggleAdd(): void {
 function addRegimentOnClick(this: SVGGElement, event: MouseEvent): void {
   if (!selectedRegiment) return;
   const point = getPointer(event, this);
-  const cell = findCell(point[0], point[1]);
+  const cell = Pack.findCell(point[0], point[1]);
   if (cell === undefined) return;
   const [x, y] = pack.cells.p[cell];
   const state = +selectedRegiment.dataset.state!;

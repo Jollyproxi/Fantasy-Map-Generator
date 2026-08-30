@@ -1,4 +1,5 @@
 import { max, quadtree, range } from "d3";
+import { Emblems } from "@/generators/emblems-generator";
 import { abbreviate, biased, ensureEl, getColors, getRandomColor, minmax, P, rand, rn, rw } from "../utils";
 
 declare global {
@@ -37,8 +38,8 @@ class CulturesGenerator {
   cells: any;
 
   getRandomShield() {
-    const type = rw(COA.shields.types);
-    return rw(COA.shields[type]);
+    const type = rw(Emblems.shields.types);
+    return rw(Emblems.shields[type]);
   }
 
   getDefault(count: number = 0): Omit<Culture, "i" | "type">[] {
@@ -1005,7 +1006,7 @@ class CulturesGenerator {
         shield: "banner"
       },
       {
-        name: "Hebrew",
+        name: "Levent",
         base: 42,
         odd: 0.2,
         sort: (i: number) => (n(i) / td(i, 18)) * sf(i),
@@ -1015,7 +1016,6 @@ class CulturesGenerator {
   }
 
   generate() {
-    TIME && console.time("generateCultures");
     this.cells = pack.cells;
     const cultureIds = new Uint16Array(this.cells.i.length); // cell cultures
 
@@ -1099,7 +1099,7 @@ class CulturesGenerator {
     pack.cultures = cultures;
     const centers = quadtree<number>();
     const colors = getColors(count);
-    const emblemShape = (ensureEl("emblemShape") as HTMLInputElement).value;
+    const emblemShape = Emblems.shape;
 
     const codes: string[] = [];
 
@@ -1129,7 +1129,7 @@ class CulturesGenerator {
       if (
         (this.cells.harbor[i] && f.type !== "lake" && P(0.1)) ||
         (this.cells.harbor[i] === 1 && P(0.6)) ||
-        (pack.features[this.cells.f[i]].group === "isle" && P(0.4))
+        (pack.features[this.cells.f[i]].subtype === "isle" && P(0.4))
       )
         return "Naval"; // low water cross penalty and high for non-along-coastline growth
       if (this.cells.r[i] && this.cells.fl[i] > 100) return "River"; // no River cross penalty, penalty for non-River growth
@@ -1202,8 +1202,6 @@ class CulturesGenerator {
     cultures.forEach((c: Culture) => {
       c.base = c.base % Names.nameBases.length;
     });
-
-    TIME && console.timeEnd("generateCultures");
   }
 
   add(center: number) {
@@ -1226,9 +1224,6 @@ class CulturesGenerator {
     const i = pack.cultures.length;
     const color = getRandomColor();
 
-    // define emblem shape
-    const emblemShape = (document.getElementById("emblemShape") as HTMLInputElement).value;
-
     pack.cultures.push({
       name,
       color,
@@ -1243,19 +1238,18 @@ class CulturesGenerator {
       urban: 0,
       origins: [pack.cells.culture[center]],
       code,
-      shield: emblemShape === "random" ? this.getRandomShield() : ""
+      shield: Emblems.shape === "random" ? this.getRandomShield() : ""
     });
   }
 
   expand() {
-    TIME && console.time("expandCultures");
     const { cells, cultures } = pack;
 
     const queue = new FlatQueue();
     const cost: number[] = [];
 
-    const neutralRate = (document.getElementById("neutralRate") as HTMLInputElement | null)?.valueAsNumber || 1;
-    const maxExpansionCost = cells.i.length * 0.6 * neutralRate; // limit cost for culture growth
+    const growthRate = (ensureEl("growthRate") as HTMLInputElement).valueAsNumber;
+    const maxExpansionCost = cells.i.length * 0.6 * growthRate; // limit cost for culture growth
 
     // remove culture from all cells except of locked
     const hasLocked = cultures.some(c => !c.removed && c.lock);
@@ -1338,8 +1332,6 @@ class CulturesGenerator {
         }
       });
     }
-
-    TIME && console.timeEnd("expandCultures");
   }
 
   regenerate(): void {

@@ -1,9 +1,10 @@
 import { drag, type Selection, select } from "d3";
-import { closeDialogs } from "@/components/dialog/dialog-helpers";
+import { closeDialogs, destroyDialog } from "@/components/dialog/dialog-helpers";
+import { Layers } from "@/components/layers";
 import { clearMainTip, tip } from "@/components/tooltips";
 import { applyDefaultViewboxEvents } from "@/components/viewbox-events";
 import { redrawIceberg } from "@/renderers/draw-ice";
-import { destroyDialogIfExists, ensureEl, findGridCell, getPointer, parseTransform } from "../utils";
+import { ensureEl, getPointer, parseTransform } from "../utils";
 
 let selectedIce: Selection<SVGElement, unknown, HTMLElement, unknown>;
 
@@ -12,7 +13,7 @@ function open(element: SVGElement): void {
   if (document.getElementById("iceEditor") && element === selectedIce.node()) return;
 
   closeDialogs(".stable");
-  if (!layerIsOn("toggleIce")) toggleIce();
+  Layers.show("ice");
 
   selectedIce = select<SVGElement, unknown>(element) as unknown as typeof selectedIce;
   const id = +selectedIce.attr("data-id");
@@ -42,7 +43,7 @@ function open(element: SVGElement): void {
 }
 
 function renderDialog(): void {
-  destroyDialogIfExists("iceEditor");
+  destroyDialog("iceEditor");
 
   const html = /* html */ `<div id="iceEditor" class="dialog">
     <button id="iceEditStyle" data-tip="Edit style in Style Editor" class="icon-brush"></button>
@@ -54,11 +55,11 @@ function renderDialog(): void {
   ensureEl("dialogs").insertAdjacentHTML("beforeend", html);
 
   // add listeners — dropped together with the dialog HTML on close
-  ensureEl("iceEditStyle").on("click", () => editStyle("ice"));
-  ensureEl("iceRandomize").on("click", randomizeShape);
-  ensureEl<HTMLInputElement>("iceSize").on("input", changeSize);
-  ensureEl("iceNew").on("click", toggleAdd);
-  ensureEl("iceRemove").on("click", removeIce);
+  ensureEl("iceEditStyle").addEventListener("click", () => editStyle("ice"));
+  ensureEl("iceRandomize").addEventListener("click", randomizeShape);
+  ensureEl<HTMLInputElement>("iceSize").addEventListener("input", changeSize);
+  ensureEl("iceNew").addEventListener("click", toggleAdd);
+  ensureEl("iceRemove").addEventListener("click", removeIce);
 }
 
 function randomizeShape(): void {
@@ -88,7 +89,7 @@ function toggleAdd(): void {
 
 function addIcebergOnClick(event: PointerEvent): void {
   const [x, y] = getPointer(event, select<SVGElement, unknown>("#viewbox").node());
-  const i = findGridCell(x, y, grid);
+  const i = Grid.findCell(x, y);
   const size = +ensureEl<HTMLInputElement>("iceSize").value || 1;
 
   Ice.addIceberg(i, size);
@@ -141,7 +142,7 @@ function closeEditor(): void {
   clearMainTip();
   ensureEl("iceNew").classList.remove("pressed");
   if (wasAdding) applyDefaultViewboxEvents();
-  destroyDialogIfExists("iceEditor");
+  destroyDialog("iceEditor");
 }
 
 export const IceEditor = { open };

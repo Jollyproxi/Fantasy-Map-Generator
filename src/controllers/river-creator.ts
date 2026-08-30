@@ -1,20 +1,23 @@
 import { select } from "d3";
-import { closeDialogs } from "@/components/dialog/dialog-helpers";
+import { closeDialogs, destroyDialog } from "@/components/dialog/dialog-helpers";
+import { Layers } from "@/components/layers";
 import { clearMainTip, tip } from "@/components/tooltips";
 import { applyDefaultViewboxEvents } from "@/components/viewbox-events";
 import { Controllers } from "@/controllers";
 import type { Point } from "@/generators/voronoi";
-import { destroyDialogIfExists, ensureEl, getPackPolygon, getPointer, last, rn } from "../utils";
+import { ensureEl, getPointer, last, rn } from "../utils";
 
 let creatorCells: number[] = [];
+
+let isCellsLayerForced = false; // the cells layer is turned on for the editing mode
 
 function open(): void {
   if (customization) return;
   closeDialogs();
-  if (!layerIsOn("toggleRivers")) toggleRivers();
+  Layers.show("rivers");
 
-  ensureEl("toggleCells").dataset.forced = String(+!layerIsOn("toggleCells"));
-  if (!layerIsOn("toggleCells")) toggleCells();
+  isCellsLayerForced = !Layers.isOn("cells");
+  Layers.show("cells");
 
   tip("Click to add river point, click again to remove", true);
   select("#debug").append("g").attr("id", "controlCells");
@@ -32,7 +35,7 @@ function open(): void {
 }
 
 function renderDialog(): void {
-  destroyDialogIfExists("riverCreator");
+  destroyDialog("riverCreator");
 
   const html = /* html */ `<div id="riverCreator" class="dialog">
     <div id="riverCreatorBody" class="table"></div>
@@ -44,9 +47,9 @@ function renderDialog(): void {
   ensureEl("dialogs").insertAdjacentHTML("beforeend", html);
 
   // add listeners — dropped together with the dialog HTML on close
-  ensureEl("riverCreatorComplete").on("click", addRiver);
-  ensureEl("riverCreatorCancel").on("click", cancelCreation);
-  ensureEl("riverCreatorBody").on("click", onBodyClick);
+  ensureEl("riverCreatorComplete").addEventListener("click", addRiver);
+  ensureEl("riverCreatorCancel").addEventListener("click", cancelCreation);
+  ensureEl("riverCreatorBody").addEventListener("click", onBodyClick);
 }
 
 function cancelCreation(): void {
@@ -62,7 +65,7 @@ function onBodyClick(ev: Event): void {
 }
 
 function onCellClick(this: any, event: any): void {
-  const cell = findCell(...(getPointer(event, this) as [number, number]))!;
+  const cell = Pack.findCell(...(getPointer(event, this) as [number, number]))!;
 
   if (creatorCells.includes(cell)) removeCell(cell);
   else addCell(cell);
@@ -94,7 +97,7 @@ function drawCells(cells: number[]): void {
     .selectAll(`polygon`)
     .data(cells)
     .join("polygon")
-    .attr("points", (d: number) => getPackPolygon(d, pack))
+    .attr("points", (d: number) => String(Pack.getPolygon(d)))
     .attr("class", "current");
 }
 
@@ -165,11 +168,10 @@ function closeRiverCreator(): void {
   applyDefaultViewboxEvents();
   clearMainTip();
 
-  const forced = +ensureEl("toggleCells").dataset.forced!;
-  ensureEl("toggleCells").dataset.forced = "0";
-  if (forced && layerIsOn("toggleCells")) toggleCells();
+  if (isCellsLayerForced) Layers.hide("cells");
+  isCellsLayerForced = false;
 
-  destroyDialogIfExists("riverCreator");
+  destroyDialog("riverCreator");
 }
 
 export const RiverCreator = { open };

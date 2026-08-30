@@ -1,14 +1,12 @@
-import { refreshEditors } from "@/components/dialog/dialog-helpers";
+import { destroyDialog, refreshEditors } from "@/components/dialog/dialog-helpers";
+import { Layers } from "@/components/layers";
 import { tip } from "@/components/tooltips";
 import { Controllers } from "@/controllers";
-import { drawGoods } from "@/renderers/draw-goods";
-import { drawMarkets } from "@/renderers/draw-markets";
-import { tradeAnimation } from "@/renderers/trade-animation";
 import { capitalize, rn } from "@/utils";
 import { CULTURE_TYPES } from "../generators/cultures-generator";
 import type { DemandCategory, Good } from "../generators/goods-generator";
 import { DEMAND_CATEGORY_ICONS, DEMAND_PRIORITY } from "../generators/goods-generator";
-import { destroyDialogIfExists, ensureEl, getRandomColor, unique } from "../utils";
+import { ensureEl, getRandomColor, unique } from "../utils";
 
 function open(editedGood?: Good, onUpdate?: () => void) {
   const icons = Array.from(ensureEl("good-icons").querySelectorAll("symbol")).map(el => el.id);
@@ -71,7 +69,7 @@ function open(editedGood?: Good, onUpdate?: () => void) {
       );
     },
     close: () => {
-      destroyDialogIfExists("goodEditor");
+      destroyDialog("goodEditor");
     },
     buttons: {
       Cancel: function () {
@@ -152,9 +150,8 @@ function open(editedGood?: Good, onUpdate?: () => void) {
           if (ensureEl<HTMLInputElement>("goodRegenerateEconomy").checked) {
             Goods.regeneratePlacement(editedGood.i);
             Production.regenerateEconomy();
-            if (layerIsOn("toggleMarketsLayer")) drawMarkets();
-            if (layerIsOn("toggleGoods")) drawGoods();
-            if (layerIsOn("toggleTrade")) tradeAnimation.restart();
+            Layers.draw("markets", "goods");
+            Layers.draw("trade");
             refreshEditors();
           } else {
             Goods.sync();
@@ -192,7 +189,7 @@ function open(editedGood?: Good, onUpdate?: () => void) {
   });
 
   function renderDialog(): void {
-    destroyDialogIfExists("goodEditor");
+    destroyDialog("goodEditor");
     ensureEl("dialogs").insertAdjacentHTML(
       "beforeend",
       /*html*/ `<div id="goodEditor" class="dialog">
@@ -455,13 +452,13 @@ function open(editedGood?: Good, onUpdate?: () => void) {
       });
     });
 
-    ensureEl("newGoodAddRecipe").on("click", event => {
+    ensureEl("newGoodAddRecipe").addEventListener("click", event => {
       event.preventDefault();
       recipes.push({ [defaultGoodId]: 1 });
       renderRecipes();
     });
 
-    ensureEl("newGoodDistributionEditor").on("click", () => {
+    ensureEl("newGoodDistributionEditor").addEventListener("click", () => {
       const distEl = ensureEl("newGoodDistribution");
       Controllers.DistributionEditor.open((dist: string) => {
         distEl.textContent = dist;

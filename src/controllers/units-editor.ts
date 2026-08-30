@@ -1,15 +1,11 @@
-import { type Selection, select } from "d3";
 import { closeDialogs } from "@/components/dialog/dialog-helpers";
-import { drawScaleBar, fitScaleBar } from "@/renderers/draw-scalebar";
-import { drawTemperature } from "@/renderers/draw-temperature";
+import { Layers } from "@/components/layers";
 import { lock, unlock } from "@/utils/preferences";
 import { ensureEl } from "../utils";
 import type { PromptOptions } from "../utils/commonUtils";
 
 // Custom app prompt shadows the DOM built-in (same pattern as burg-editor / route-groups-editor).
 declare const prompt: (text: string, options: PromptOptions, callback: (value: string | number) => void) => void;
-
-type ScaleBarSelection = Selection<SVGGElement, unknown, HTMLElement, unknown>;
 
 // The #unitsEditor inputs (distanceUnitInput, heightUnit, temperatureScale, …) are app-wide
 // settings cached as globals at load and read across the codebase, so this module does NOT
@@ -27,23 +23,17 @@ function open(): void {
   if (initialized) return;
   initialized = true;
 
-  ensureEl("distanceUnitInput").on("change", changeDistanceUnit);
-  ensureEl("distanceScaleInput").on("change", changeDistanceScale);
-  ensureEl("heightUnit").on("change", changeHeightUnit);
-  ensureEl("heightExponentInput").on("input", changeHeightExponent);
-  ensureEl("temperatureScale").on("change", changeTemperatureScale);
+  ensureEl("distanceUnitInput").addEventListener("change", changeDistanceUnit);
+  ensureEl("distanceScaleInput").addEventListener("change", changeDistanceScale);
+  ensureEl("heightUnit").addEventListener("change", changeHeightUnit);
+  ensureEl("heightExponentInput").addEventListener("input", changeHeightExponent);
+  ensureEl("temperatureScale").addEventListener("change", changeTemperatureScale);
 
-  ensureEl("populationRateInput").on("change", changePopulationRate);
-  ensureEl("urbanizationInput").on("change", changeUrbanizationRate);
-  ensureEl("urbanDensityInput").on("change", changeUrbanDensity);
+  ensureEl("populationRateInput").addEventListener("change", changePopulationRate);
+  ensureEl("urbanizationInput").addEventListener("change", changeUrbanizationRate);
+  ensureEl("urbanDensityInput").addEventListener("change", changeUrbanDensity);
 
-  ensureEl("unitsRestore").on("click", restoreDefaultUnits);
-}
-
-function renderScaleBar(): void {
-  const bar = select("#scaleBar") as unknown as ScaleBarSelection;
-  drawScaleBar(bar, scale);
-  fitScaleBar(bar, svgWidth, svgHeight);
+  ensureEl("unitsRestore").addEventListener("click", restoreDefaultUnits);
 }
 
 function changeDistanceUnit(this: HTMLSelectElement): void {
@@ -51,19 +41,19 @@ function changeDistanceUnit(this: HTMLSelectElement): void {
     prompt("Provide a custom name for a distance unit", { default: "" }, custom => {
       this.options.add(new Option(String(custom), String(custom), false, true));
       lock("distanceUnit");
-      renderScaleBar();
+      Layers.draw("scaleBar");
       calculateFriendlyGridSize();
     });
     return;
   }
 
-  renderScaleBar();
+  Layers.draw("scaleBar");
   calculateFriendlyGridSize();
 }
 
 function changeDistanceScale(this: HTMLInputElement): void {
   distanceScale = +this.value;
-  renderScaleBar();
+  Layers.draw("scaleBar");
   calculateFriendlyGridSize();
 }
 
@@ -77,12 +67,12 @@ function changeHeightUnit(this: HTMLSelectElement): void {
 }
 
 function changeHeightExponent(): void {
-  calculateTemperatures();
-  if (layerIsOn("toggleTemperature")) drawTemperature();
+  Temperature.generate();
+  Layers.draw("temperature");
 }
 
 function changeTemperatureScale(): void {
-  if (layerIsOn("toggleTemperature")) drawTemperature();
+  Layers.draw("temperature");
 }
 
 function changePopulationRate(this: HTMLInputElement): void {
@@ -118,9 +108,9 @@ function restoreDefaultUnits(): void {
   // height exponent
   heightExponentInput.value = "1.8";
   localStorage.removeItem("heightExponent");
-  calculateTemperatures();
+  Temperature.generate();
 
-  renderScaleBar();
+  Layers.draw("scaleBar");
 
   // population
   populationRate = 1000;

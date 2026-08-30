@@ -1,6 +1,7 @@
 import Alea from "alea";
 import { min } from "d3";
-import { clipPoly, getGridPolygon, getIsolines, lerp, minmax, normalize, P, ra, rand, rn } from "../utils";
+import { redrawGlacier, redrawIceberg } from "@/renderers/draw-ice";
+import { clipPoly, getIsolines, lerp, minmax, normalize, P, ra, rand, rn } from "../utils";
 import type { Point } from "./voronoi";
 
 declare global {
@@ -70,10 +71,9 @@ class IceModule {
       const size = minmax(rn(baseSize * randomFactor, 2), 0.1, 1);
 
       const [cx, cy] = grid.points[cellId];
-      const points = getGridPolygon(cellId, grid).map(([x, y]: Point) => [
-        rn(lerp(cx, x, size), 2),
-        rn(lerp(cy, y, size), 2)
-      ]);
+      const points = Grid.getPolygon(cellId).map(
+        ([x, y]): Point => [rn(lerp(cx, x, size), 2), rn(lerp(cy, y, size), 2)]
+      );
 
       const ice: Iceberg = { i: this.getNextId(), points, type: "iceberg", cellId, size };
       pack.ice.push(ice);
@@ -97,14 +97,11 @@ class IceModule {
 
   addIceberg(cellId: number, size: number) {
     const [cx, cy] = grid.points[cellId];
-    const points = getGridPolygon(cellId, grid).map(([x, y]: Point) => [
-      rn(lerp(cx, x, size), 2),
-      rn(lerp(cy, y, size), 2)
-    ]);
+    const points = Grid.getPolygon(cellId).map(([x, y]): Point => [rn(lerp(cx, x, size), 2), rn(lerp(cy, y, size), 2)]);
     const id = this.getNextId();
     const ice: Iceberg = { i: id, points, type: "iceberg", cellId, size };
     pack.ice.push(ice);
-    window.redrawIceberg(id);
+    redrawIceberg(id);
   }
 
   removeIce(id: number) {
@@ -113,9 +110,9 @@ class IceModule {
       const index = pack.ice.indexOf(ice);
       pack.ice.splice(index, 1);
       if (ice.type === "glacier") {
-        window.redrawGlacier(id);
+        redrawGlacier(id);
       } else {
-        window.redrawIceberg(id);
+        redrawIceberg(id);
       }
     }
   }
@@ -130,9 +127,9 @@ class IceModule {
 
     // Get a different random cell for the polygon template
     const i: number = ra(grid.cells.i);
-    const cn: [number, number] = grid.points[i];
-    const poly = getGridPolygon(i, grid).map((p: [number, number]) => [p[0] - cn[0], p[1] - cn[1]]);
-    const points = poly.map((p: [number, number]) => [rn(cx + p[0] * size, 2), rn(cy + p[1] * size, 2)]);
+    const cn: Point = grid.points[i];
+    const poly = Grid.getPolygon(i).map((p): Point => [p[0] - cn[0], p[1] - cn[1]]);
+    const points = poly.map((p): Point => [rn(cx + p[0] * size, 2), rn(cy + p[1] * size, 2)]);
 
     iceberg.points = points;
   }

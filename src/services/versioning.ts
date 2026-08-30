@@ -4,20 +4,35 @@
  * We use Semantic Versioning: major.minor.patch. Refer to https://semver.org
  * Our .map file format is considered the public API.
  *
- * Update the version on each merge to master:
+ * Update the version before merging to master:
  * 1. MAJOR version: Incompatible changes that break existing maps
  * 2. MINOR version: Additions or changes that are backward-compatible but may require old .map files to be updated
  * 3. PATCH version: Backward-compatible bug fixes and small features that don't affect the .map file format
  *
  * Example: 1.102.2 -> Major version 1, Minor version 102, Patch version 2
- * Version bumping is automated via GitHub Actions on PR merge.
+ * VERSION below is the only source of truth. Edit it by hand: the pre-commit hook copies it where needed.
  *
- * For the changes that may be interesting to end users, update the `latestPublicChanges` array below (new changes on top).
+ * For the changes that may be interesting for end users, update the `latestPublicChanges` below.
  */
 
-export const VERSION = "1.139.11";
+import { dialogState } from "@/components/dialog/state";
+import { tip } from "@/components/tooltips";
+import { isElectron } from "./platform";
 
+export const VERSION = "1.149.2";
+
+// new changes on top
 const latestPublicChanges = [
+  "Desktop App",
+  "URL params to open specific layers or preset",
+  "Emblems rendering optimization",
+  "Dialogs state preserved between sessions",
+  "Paint Area dialogs rework",
+  "Relief icons: improved performance",
+  "Configurable table columns",
+  "Labels: improved performance",
+  "Labels Overview",
+  "Route and river labels",
   "Economic simulation",
   "Trade animation",
   "Navigable rivers",
@@ -26,12 +41,7 @@ const latestPublicChanges = [
   "Jagged coastlines",
   "Heightmap Editor: Fill brush",
   "Editors: undo button",
-  "Minimap",
-  "Search input in Overview dialogs",
-  "Custom burg grouping and icon selection",
-  "Ability to set custom image as Marker or Regiment icon",
-  "Submap and Transform tools rework",
-  "Azgaar Bot to answer questions and provide help"
+  "Minimap"
 ];
 
 export function parseMapVersion(version: string): string {
@@ -81,20 +91,29 @@ export function compareVersions(
   return { isEqual, isNewer, isOlder };
 }
 
-export async function cleanupData(): Promise<void> {
-  await clearCache();
-  localStorage.clear();
-  localStorage.setItem("version", VERSION);
-  localStorage.setItem("disable_click_arrow_tooltip", "true");
+export async function clearCache(): Promise<void> {
+  if (!isElectron()) {
+    const cacheNames = await caches.keys();
+    await Promise.all(cacheNames.map(cacheName => caches.delete(cacheName)));
+
+    const registrations = (await navigator.serviceWorker?.getRegistrations()) ?? [];
+    await Promise.all(registrations.map(registration => registration.unregister()));
+  }
+
   location.reload();
 }
 
-async function clearCache(): Promise<unknown> {
-  const cacheNames = await caches.keys();
-  return Promise.all(cacheNames.map(cacheName => caches.delete(cacheName)));
+export async function cleanupData(): Promise<void> {
+  localStorage.clear();
+  dialogState.clear();
+  localStorage.setItem("version", VERSION);
+  localStorage.setItem("disable_click_arrow_tooltip", "true");
+  await clearCache();
 }
 
 function showUpdateWindow(storedVersion: string | null): void {
+  localStorage.setItem("version", VERSION);
+
   const changelog = "https://github.com/Azgaar/Fantasy-Map-Generator/wiki/Changelog";
   const reddit = "https://www.reddit.com/r/FantasyMapGenerator";
   const discord = "https://discordapp.com/invite/X7E84HU";
@@ -108,6 +127,8 @@ function showUpdateWindow(storedVersion: string | null): void {
       ${latestPublicChanges.map(change => `<li>${change}</li>`).join("")}
     </ul>
 
+    ${isElectron() ? "" : `<p>The Generator is also available as a <a href="#" onclick="window.Services.AppOffer.open(); return false">desktop app</a> that works offline.</p>`}
+
     <p>Join our <a href="${discord}" target="_blank">Discord server</a> and <a href="${reddit}" target="_blank">Reddit community</a> to ask questions, share maps, discuss the Generator and Worldbuilding, report bugs and propose new features.</p>
     <span><i>Thanks for all supporters on <a href="${patreon}" target="_blank">Patreon</a>!</i></span>`;
 
@@ -117,10 +138,9 @@ function showUpdateWindow(storedVersion: string | null): void {
     width: "28em",
     position: { my: "center center-4em", at: "center", of: "svg" },
     buttons: {
-      "Clear cache": () => cleanupData(),
+      "Clear cache": () => clearCache(),
       "Don't show again": function (this: HTMLElement) {
         $(this).dialog("close");
-        localStorage.setItem("version", VERSION);
       }
     }
   });
@@ -134,8 +154,16 @@ function announceVersion(): void {
   if (loadingScreenVersion) loadingScreenVersion.innerText = `v${VERSION}`;
 
   const storedVersion = localStorage.getItem("version");
+  if (!storedVersion) {
+    setTimeout(() => showUpdateWindow(null), 6000);
+    return;
+  }
+
   if (compareVersions(storedVersion, VERSION, { major: true, minor: true, patch: false }).isOlder) {
     setTimeout(() => showUpdateWindow(storedVersion), 6000);
+  } else if (compareVersions(storedVersion, VERSION).isOlder) {
+    localStorage.setItem("version", VERSION);
+    tip(`Updated to v${VERSION}. Reload the page if you get errors`, true, "success", 6000);
   }
 }
 

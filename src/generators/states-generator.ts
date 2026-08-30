@@ -1,4 +1,6 @@
 import { mean, median, quadtree, sum } from "d3";
+import { Emblems } from "@/generators/emblems-generator";
+import type { Emblem } from "@/types/emblems";
 import {
   each,
   ensureEl,
@@ -16,6 +18,7 @@ import {
   rw,
   trimVowels
 } from "../utils";
+import type { Label } from "./labels-generator";
 import type { Regiment } from "./military-generator";
 
 declare global {
@@ -30,7 +33,7 @@ export interface State {
   type: string;
   center: number;
   culture: number;
-  coa: any;
+  coa: Emblem;
   lock?: boolean;
   removed?: boolean;
   pole?: [number, number];
@@ -53,6 +56,7 @@ export interface State {
   salesTax: number;
   pollTax: number;
   treasury: number;
+  label?: Label;
 }
 
 interface Campaign {
@@ -118,7 +122,7 @@ class StatesModule {
     for (const burg of validBurgs) {
       if (!burg.capital || lockedCapitals.includes(burg.i)) continue;
       burg.capital = 0;
-      Burgs.changeGroup(burg, null, false);
+      Burgs.changeGroup(burg, null);
     }
 
     for (const state of pack.states) {
@@ -161,7 +165,7 @@ class StatesModule {
           burg.capital = 1;
           capital = burg;
           capitalsTree.add([burg.x, burg.y]);
-          Burgs.changeGroup(capital, null, false);
+          Burgs.changeGroup(capital, null);
           break;
         }
         spacing = Math.max(spacing - 1, 1);
@@ -180,8 +184,8 @@ class StatesModule {
           ? "Generic"
           : pack.cultures[culture].type;
       const expansionism = rn(Math.random() * ensureEl<HTMLInputElement>("sizeVariety").valueAsNumber + 1, 1);
-      const coa = COA.generate(capital.coa, 0.3, null, pack.cultures[culture].type);
-      coa.shield = capital.coa.shield;
+      const coa = Emblems.generate(capital.coa, 0.3, null, pack.cultures[culture].type);
+      coa.shield = capital.coa?.shield;
       newStates.push({
         i: stateId,
         name,
@@ -212,8 +216,8 @@ class StatesModule {
       const basename = burg.name!.length < 9 && each5th(burg.cell) ? burg.name! : Names.getCultureShort(burg.culture!);
       const name = Names.getState(basename, burg.culture!);
       const type = pack.cultures[burg.culture!].type;
-      const coa = COA.generate(null, null, null, type);
-      coa.shield = COA.getShield(burg.culture!);
+      const coa = Emblems.generate(null, null, null, type);
+      coa.shield = Emblems.getShield(burg.culture!);
       states.push({
         i: burg.i,
         name,
@@ -265,7 +269,6 @@ class StatesModule {
   }
 
   generate() {
-    TIME && console.time("generateStates");
     pack.states = this.createStates();
     this.expandStates();
     this.normalize();
@@ -274,8 +277,6 @@ class StatesModule {
     this.assignColors();
     this.generateCampaigns();
     this.generateDiplomacy();
-
-    TIME && console.timeEnd("generateStates");
   }
 
   expandStates() {
@@ -431,7 +432,6 @@ class StatesModule {
 
   // calculate states data like area, population etc.
   collectStatistics() {
-    TIME && console.time("collectStatistics");
     const { cells, states } = pack;
 
     states.forEach(s => {
@@ -452,8 +452,6 @@ class StatesModule {
         states[s].burgs!++;
       }
     }
-
-    TIME && console.timeEnd("collectStatistics");
   }
 
   generateCampaign(state: State): Campaign[] {
@@ -676,7 +674,6 @@ class StatesModule {
 
   // select a forms for listed or all valid states
   defineStateForms(list: number[] | null = null) {
-    TIME && console.time("defineStateForms");
     const states = pack.states.filter(s => s.i && !s.removed && !s.lock);
     if (states.length < 1) return;
 
@@ -816,8 +813,6 @@ class StatesModule {
       s.salesTax = taxes.salesTax;
       s.pollTax = taxes.pollTax;
     }
-
-    TIME && console.timeEnd("defineStateForms");
   }
 
   defineTaxRates(state: State) {

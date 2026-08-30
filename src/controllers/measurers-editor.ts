@@ -1,12 +1,12 @@
 import { type D3DragEvent, drag, type Selection, select } from "d3";
-import { closeDialogs } from "@/components/dialog/dialog-helpers";
+import { closeDialogs, destroyDialog } from "@/components/dialog/dialog-helpers";
+import { Layers } from "@/components/layers";
 import { clearMainTip, tip } from "@/components/tooltips";
 import { applyDefaultViewboxEvents } from "@/components/viewbox-events";
 import { type Measurer, Measurers, type MeasurerType } from "@/generators/measurers-generator";
 import type { Point } from "@/generators/voronoi";
-import { drawMeasurers, undrawMeasurers } from "@/renderers/draw-measurers";
 import { highlightElement } from "@/renderers/overlays/highlight";
-import { destroyDialogIfExists, ensureEl, getSegmentId, last, rn } from "../utils";
+import { ensureEl, getSegmentId, last, rn } from "../utils";
 
 type MeasurerEl = Selection<SVGGElement, unknown, null, undefined>;
 type MeasurerDragEvent<E extends Element = SVGGElement> = D3DragEvent<E, unknown, unknown>;
@@ -20,7 +20,7 @@ function open(): void {
   if (customization) return;
 
   closeDialogs("#measurersEditor, .stable");
-  if (!layerIsOn("toggleRulers")) toggleRulers();
+  Layers.show("rulers");
 
   renderDialog();
   select("#ruler").classed("editable", true); // interactive cursor while the editor is open
@@ -35,7 +35,7 @@ function open(): void {
 }
 
 function renderDialog(): void {
-  destroyDialogIfExists("measurersEditor");
+  destroyDialog("measurersEditor");
 
   const html = /* html */ `<div id="measurersEditor" class="dialog">
     <div id="measurersBody" class="table" style="margin-bottom: 0.3em"></div>
@@ -51,25 +51,24 @@ function renderDialog(): void {
   </div>`;
   ensureEl("dialogs").insertAdjacentHTML("beforeend", html);
 
-  ensureEl("measurersBody").on("click", onListClick);
-  ensureEl("addLinearRuler").on("click", addRuler);
-  ensureEl("addOpisometer").on("click", toggleOpisometerMode);
-  ensureEl("addRouteOpisometer").on("click", toggleRouteOpisometerMode);
-  ensureEl("addPlanimeter").on("click", togglePlanimeterMode);
-  ensureEl("removeMeasurers").on("click", removeAllMeasurers);
+  ensureEl("measurersBody").addEventListener("click", onListClick);
+  ensureEl("addLinearRuler").addEventListener("click", addRuler);
+  ensureEl("addOpisometer").addEventListener("click", toggleOpisometerMode);
+  ensureEl("addRouteOpisometer").addEventListener("click", toggleRouteOpisometerMode);
+  ensureEl("addPlanimeter").addEventListener("click", togglePlanimeterMode);
+  ensureEl("removeMeasurers").addEventListener("click", removeAllMeasurers);
 }
 
 function onClose(): void {
   if (ensureEl("measurersBottom").querySelector(".pressed")) exitDrawingMode();
   select("#ruler").classed("editable", false);
-  if (layerIsOn("toggleRulers")) drawMeasurers();
-  else undrawMeasurers();
-  destroyDialogIfExists("measurersEditor");
+  Layers.draw("rulers");
+  destroyDialog("measurersEditor");
 }
 
 // every data change goes through a full redraw
 function redraw(): void {
-  drawMeasurers();
+  Layers.draw("rulers");
 
   const groups = document.querySelectorAll<SVGGElement>("#ruler > g");
   groups.forEach((node, index) => {
@@ -172,7 +171,7 @@ function togglePlanimeterMode(this: HTMLElement): void {
 function toggleRouteOpisometerMode(this: HTMLElement): void {
   const tipText = "Draw a curve along routes to measure length. Hold Shift to measure away from roads.";
   startDrawingMode(this, tipText, (event: any) => {
-    const cell = findCell(event.x, event.y)!;
+    const cell = Pack.findCell(event.x, event.y)!;
     if (!Routes.isConnected(cell) && !event.sourceEvent.shiftKey) {
       exitDrawingMode();
       tip("Must start in a cell with a route in it", false, "error");
@@ -182,7 +181,7 @@ function toggleRouteOpisometerMode(this: HTMLElement): void {
     const routeOpisometer = Measurers.create("RouteOpisometer", [getCellCoord(cell)]);
     redraw();
     event.on("drag", (dragEvent: any) => {
-      const c = findCell(dragEvent.x, dragEvent.y)!;
+      const c = Pack.findCell(dragEvent.x, dragEvent.y)!;
       if (Routes.isConnected(c) || dragEvent.sourceEvent.shiftKey) trackCell(routeOpisometer, c, true);
     });
     event.on("end", () => finishStroke(routeOpisometer, 2));
@@ -257,7 +256,7 @@ function optimizePoints(measurer: Measurer): void {
 
 function trackCell(measurer: Measurer, cell: number, right: boolean): void {
   // cell per point, derived on demand: points are cell/burg coordinates, so findCell restores them
-  const cellStops = measurer.points.map(p => findCell(p[0], p[1])!);
+  const cellStops = measurer.points.map(p => Pack.findCell(p[0], p[1])!);
   const foundIndex = cellStops.indexOf(cell);
 
   if (right) {
@@ -416,7 +415,7 @@ function dragEndpoint(measurer: Measurer, event: MeasurerDragEvent<SVGCircleElem
 
 function dragRouteEndpoint(measurer: Measurer, event: MeasurerDragEvent<SVGCircleElement>, right: boolean): void {
   event.on("drag", (dragEvent: MeasurerDragEvent<SVGCircleElement>) => {
-    const cell = findCell(dragEvent.x | 0, dragEvent.y | 0);
+    const cell = Pack.findCell(dragEvent.x | 0, dragEvent.y | 0);
     if (cell === undefined) return;
     if (!Routes.isConnected(cell) && !dragEvent.sourceEvent.shiftKey) return;
     trackCell(measurer, cell, right);

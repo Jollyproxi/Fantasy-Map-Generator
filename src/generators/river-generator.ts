@@ -2,6 +2,7 @@ import Alea from "alea";
 import { curveBasis, curveCatmullRom, line, mean, min, select, sum } from "d3";
 import { each, rn, round, rw } from "../utils";
 import { meander, projectToNearestEdge } from "../utils/pathUtils";
+import type { Label } from "./labels-generator";
 import type { Point } from "./voronoi";
 
 export const MIN_NAVIGABLE_FLUX = 100;
@@ -21,6 +22,7 @@ export interface River {
   type: string; // river type
   cells: number[]; // cells forming the river path
   points?: Point[]; // river points (for meandering)
+  label?: Label;
 }
 
 class RiverModule {
@@ -163,7 +165,6 @@ class RiverModule {
   }
 
   generate(allowErosion = true) {
-    TIME && console.time("generateRivers");
     Math.random = Alea(seed);
     const { cells, features } = pack;
 
@@ -407,8 +408,6 @@ class RiverModule {
       cells.h = Uint8Array.from(h); // apply gradient
       downcutRivers(); // downcut river beds
     }
-
-    TIME && console.timeEnd("generateRivers");
   }
 
   alterHeights(): number[] {

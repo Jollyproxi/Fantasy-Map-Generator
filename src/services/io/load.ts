@@ -1,13 +1,15 @@
 import { select } from "d3";
 import { closeDialogs } from "@/components/dialog/dialog-helpers";
+import { Layers } from "@/components/layers";
 import { clearMainTip, tip } from "@/components/tooltips";
 import { applyDefaultViewboxEvents } from "@/components/viewbox-events";
+import { GraphOverride } from "@/generators/graph-override";
+import { invalidateEmblems } from "@/renderers/draw-emblems";
 import { clearLegend } from "@/renderers/draw-legend";
-import { drawMeasurers } from "@/renderers/draw-measurers";
 import { Services } from "@/services";
 import { declareFont } from "@/services/fonts";
-import { cleanupData, compareVersions, isValidVersion, parseMapVersion, VERSION } from "@/services/versioning";
-import { applyOption, calculateVoronoi, ensureEl, last, link, minmax, parseError, rn } from "@/utils";
+import { clearCache, compareVersions, isValidVersion, parseMapVersion, VERSION } from "@/services/versioning";
+import { applyOption, ensureEl, last, link, minmax, parseError, rn } from "@/utils";
 
 async function quickLoad(): Promise<void> {
   const blob = await ldb.get("lastMap");
@@ -113,7 +115,7 @@ function showUploadErrorMessage(error: string, maplink: string, random?: boolean
     title: "Loading error",
     width: "32em",
     buttons: {
-      "Clear cache": () => cleanupData(),
+      "Clear cache": () => clearCache(),
       OK: function (this: HTMLElement) {
         $(this).dialog("close");
       }
@@ -228,7 +230,7 @@ function showUploadMessage(type: string, mapData: string[] | null, mapVersion: s
   $("#alert").dialog({
     title,
     buttons: {
-      "Clear cache": () => cleanupData(),
+      "Clear cache": () => clearCache(),
       OK: function (this: HTMLElement) {
         $(this).dialog("close");
       }
@@ -237,6 +239,8 @@ function showUploadMessage(type: string, mapData: string[] | null, mapVersion: s
 }
 
 async function parseLoadedData(data: string[], mapVersion: string | null): Promise<void> {
+  let loadGroupOpen = false;
+
   try {
     // exit customization
     if (typeof window.closeDialogs === "function") closeDialogs();
@@ -248,8 +252,11 @@ async function parseLoadedData(data: string[], mapVersion: string | null): Promi
       if (params[3]) {
         seed = params[3];
         ensureEl<HTMLInputElement>("optionsSeed").value = seed;
-        INFO && console.group(`Loaded Map ${seed}`);
-      } else INFO && console.group("Loaded Map");
+      }
+      if (INFO) {
+        console.group(params[3] ? `Loaded Map ${seed}` : "Loaded Map");
+        loadGroupOpen = true;
+      }
       if (params[4]) graphWidth = +params[4];
       if (params[5]) graphHeight = +params[5];
       mapId = params[6] ? +params[6] : Date.now();
@@ -283,13 +290,17 @@ async function parseLoadedData(data: string[], mapVersion: string | null): Promi
       options.mapSize ??= 100;
       options.latitude ??= 50;
       options.prec ??= 100;
+      options.labels ??= Labels.getDefaultOptions();
+      options.emblems ??= { showAll: false };
+      options.emblems.showAll ??= false;
+      options.burgs ??= { groups: Burgs.getDefaultGroups() };
       // setting 16 and 17 (temperature) are part of options now, kept as "" in newer versions for compatibility
       if (settings[16]) options.temperatureEquator = +settings[16];
       if (settings[17]) options.temperatureNorthPole = options.temperatureSouthPole = +settings[17];
       if (settings[20]) mapName.value = settings[20];
-      if (settings[21]) hideLabels.checked = Boolean(+settings[21]);
+      // if (settings[21]) hideLabels.checked = Boolean(+settings[21]); // moved to options.labels.showAll
       if (settings[22]) stylePreset.value = settings[22];
-      if (settings[23]) rescaleLabels.checked = Boolean(+settings[23]);
+      // if (settings[23]) rescaleLabels.checked = Boolean(+settings[23]); // moved to options.labels.resizeOnZoom
       if (settings[24]) {
         ensureEl<HTMLInputElement>("urbanDensityInput").value = settings[24];
         urbanDensity = +settings[24];
@@ -298,7 +309,7 @@ async function parseLoadedData(data: string[], mapVersion: string | null): Promi
       options.longitude ??= 50;
       if (settings[26]) ensureEl<HTMLInputElement>("growthRate").value = settings[26];
     }
-    ensureEl<HTMLInputElement>("stateLabelsModeInput").value = options.stateLabelsMode;
+    // ensureEl<HTMLInputElement>("stateLabelsModeInput").value = options.stateLabelsMode; // moved to options.labels.groups[group].mode
     ensureEl<HTMLInputElement>("yearInput").value = String(options.year);
     ensureEl<HTMLInputElement>("eraInput").value = options.era;
     ensureEl<HTMLInputElement>("shapeRendering").value =
@@ -318,91 +329,26 @@ async function parseLoadedData(data: string[], mapVersion: string | null): Promi
       });
     }
 
-    svg.remove();
+    select("#map").remove();
     document.body.insertAdjacentHTML("afterbegin", data[5]);
-    // Reselect with the global d3 v5 (not the bundled d3 v7 `select`): the global
-    // `svg`/`viewbox` selections are consumed by legacy v5 code (zoom behavior,
-    // `d3.mouse`, `d3.event`). A v7 selection dispatches events without setting the
-    // v5 global `d3.event`, breaking mouse/zoom handlers after a map load (#1508).
-    // Every layer selection below chains off `svg`, so they all inherit v5.
-    svg = (window as any).d3.select("#map") as typeof svg;
-    defs = svg.select<SVGDefsElement>("#deftemp");
-    viewbox = svg.select<SVGElement>("#viewbox");
-    scaleBar = svg.select<SVGGElement>("#scaleBar");
-    legend = svg.select("#legend");
-    ocean = viewbox.select<SVGGElement>("#ocean");
-    oceanLayers = ocean.select<SVGGElement>("#oceanLayers");
-    oceanPattern = ocean.select<SVGGElement>("#oceanPattern");
-    lakes = viewbox.select<SVGGElement>("#lakes");
-    landmass = viewbox.select<SVGGElement>("#landmass");
-    texture = viewbox.select<SVGGElement>("#texture");
-    terrs = viewbox.select<SVGGElement>("#terrs");
-    biomes = viewbox.select<SVGGElement>("#biomes");
-    ice = viewbox.select<SVGGElement>("#ice");
-    cells = viewbox.select<SVGGElement>("#cells");
-    gridOverlay = viewbox.select<SVGGElement>("#gridOverlay");
-    coordinates = viewbox.select<SVGGElement>("#coordinates");
-    compass = viewbox.select<SVGGElement>("#compass");
-    rivers = viewbox.select<SVGElement>("#rivers");
-    terrain = viewbox.select<SVGGElement>("#terrain");
-    relig = viewbox.select<SVGGElement>("#relig");
-    cults = viewbox.select<SVGGElement>("#cults");
-    regions = viewbox.select<SVGGElement>("#regions");
-    statesBody = regions.select<SVGGElement>("#statesBody");
-    statesHalo = regions.select<SVGGElement>("#statesHalo");
-    provs = viewbox.select<SVGGElement>("#provs");
-    zones = viewbox.select<SVGGElement>("#zones");
-    borders = viewbox.select<SVGGElement>("#borders");
-    stateBorders = borders.select<SVGGElement>("#stateBorders");
-    provinceBorders = borders.select<SVGGElement>("#provinceBorders");
-    routes = viewbox.select<SVGElement>("#routes");
-    roads = routes.select<SVGGElement>("#roads");
-    trails = routes.select<SVGGElement>("#trails");
-    searoutes = routes.select<SVGGElement>("#searoutes");
-    temperature = viewbox.select<SVGGElement>("#temperature");
-    coastline = viewbox.select<SVGGElement>("#coastline");
-    prec = viewbox.select<SVGGElement>("#prec");
-    population = viewbox.select<SVGGElement>("#population");
-    goods = viewbox.select<SVGGElement>("#goods");
-    markets = viewbox.select<SVGGElement>("#markets");
-    emblems = viewbox.select<SVGElement>("#emblems");
-    labels = viewbox.select<SVGGElement>("#labels");
-    icons = viewbox.select<SVGGElement>("#icons");
-    burgIcons = icons.select<SVGGElement>("#burgIcons");
-    anchors = icons.select<SVGGElement>("#anchors");
-    armies = viewbox.select<SVGGElement>("#armies");
-    markers = viewbox.select<SVGGElement>("#markers");
-    tradeAnimation = viewbox.select<SVGGElement>("#tradeAnimation");
-    ruler = viewbox.select<SVGGElement>("#ruler");
-    fogging = viewbox.select<SVGGElement>("#fogging");
-    debug = viewbox.select<SVGElement>("#debug");
-    burgLabels = labels.select<SVGGElement>("#burgLabels");
+    invalidateEmblems(); // the viewport scene belongs to the map that was just dropped
 
-    if (!texture.size()) {
-      texture = viewbox
-        .insert("g", "#landmass")
-        .attr("id", "texture")
-        .attr("data-href", "./images/textures/plaster.jpg");
+    // TODO: check if we need it or if LayersRegistry resolves it automatically?
+    const viewbox = select("#viewbox");
+    if (!select("#texture").size()) {
+      viewbox.insert("g", "#landmass").attr("id", "texture").attr("data-href", "./images/textures/plaster.jpg");
     }
-    if (!emblems.size()) {
-      emblems = viewbox
-        .insert("g", "#labels")
-        .attr("id", "emblems")
-        .style("display", "none") as unknown as typeof emblems;
+    if (!select("#emblems").size()) {
+      viewbox.insert("g", "#labels").attr("id", "emblems").style("display", "none");
     }
-
-    {
-      grid = JSON.parse(data[6]);
-      const { cells, vertices } = calculateVoronoi(grid.points, grid.boundary);
-      grid.cells = cells;
-      grid.vertices = vertices;
-      grid.cells.h = Uint8Array.from(data[7].split(","), Number);
-      grid.cells.prec = Uint8Array.from(data[8].split(","), Number);
-      grid.cells.f = Uint16Array.from(data[9].split(","), Number);
-      grid.cells.t = Int8Array.from(data[10].split(","), Number);
-      grid.cells.temp = Int8Array.from(data[11].split(","), Number);
-    }
-    reGraph();
+    grid = JSON.parse(data[6]);
+    Grid.rebuildGraph(grid);
+    grid.cells.h = Uint8Array.from(data[7].split(","), Number);
+    grid.cells.prec = Uint8Array.from(data[8].split(","), Number);
+    grid.cells.f = Uint16Array.from(data[9].split(","), Number);
+    grid.cells.t = Int8Array.from(data[10].split(","), Number);
+    grid.cells.temp = Int8Array.from(data[11].split(","), Number);
+    Pack.generate();
     Features.markupPack();
     if (data[3]?.startsWith("[")) {
       type LoadedBiome = (typeof pack.biomes)[number] & {
@@ -458,6 +404,8 @@ async function parseLoadedData(data: string[], mapVersion: string | null): Promi
     pack.deals = data[43] ? JSON.parse(data[43]) : [];
     pack.cells.market = data[44] ? Uint16Array.from(data[44].split(","), Number) : new Uint16Array(pack.cells.i.length);
     pack.measurers = data[46] ? JSON.parse(data[46]) : [];
+    pack.addedLabels = data[47] ? JSON.parse(data[47]) : [];
+    pack.relief = data[49] ? JSON.parse(data[49]) : [];
 
     if (data[31]) {
       const namesDL = data[31].split("/");
@@ -475,74 +423,27 @@ async function parseLoadedData(data: string[], mapVersion: string | null): Promi
       if (goodIconsDefs) goodIconsDefs.insertAdjacentHTML("beforeend", data[45]);
     }
 
+    if (data[48]) style = JSON.parse(data[48]);
+
     {
-      const isVisible = (selection: { node(): Element | null; style(name: string): string }) =>
-        selection.node() && selection.style("display") !== "none";
-      const isVisibleNode = (node: HTMLElement | null) => node && node.style.display !== "none";
-      const hasChildren = (selection: { node(): Element | null }) => selection.node()?.hasChildNodes();
-      const hasChild = (selection: { node(): Element | null }, selector: string) =>
-        selection.node()?.querySelector(selector);
-      const turnOn = (el: string) => ensureEl(el).classList.remove("buttonoff");
-
-      // turn all layers off
-      ensureEl("mapLayers")
-        .querySelectorAll("li")
-        .forEach(el => {
-          el.classList.add("buttonoff");
-        });
-
-      // turn on active layers
-      if (hasChild(select("#texture"), "image")) turnOn("toggleTexture");
-      if (hasChildren(select("#terrs").select("#landHeights"))) turnOn("toggleHeight");
-      if (isVisible(select("#lakes"))) turnOn("toggleLakes");
-      if (hasChildren(select("#biomes"))) turnOn("toggleBiomes");
-      if (hasChildren(select("#cells"))) turnOn("toggleCells");
-      if (hasChildren(select("#gridOverlay"))) turnOn("toggleGrid");
-      if (hasChildren(select("#coordinates"))) turnOn("toggleCoordinates");
-      if (isVisible(select("#compass")) && hasChild(select("#compass"), "use")) turnOn("toggleCompass");
-      if (hasChildren(select("#rivers"))) turnOn("toggleRivers");
-      if (isVisible(terrain) && hasChildren(terrain)) turnOn("toggleRelief");
-      if (hasChildren(select("#relig"))) turnOn("toggleReligions");
-      if (hasChildren(select("#cults"))) turnOn("toggleCultures");
-      if (hasChildren(select("#statesBody"))) turnOn("toggleStates");
-      if (hasChildren(select("#provs"))) turnOn("toggleProvinces");
-      if (hasChildren(select("#zones")) && isVisible(select("#zones"))) turnOn("toggleZones");
-      if (isVisible(select("#borders")) && hasChild(select("#borders"), "path")) turnOn("toggleBorders");
-      if (isVisible(select("#routes")) && hasChild(select("#routes"), "path")) turnOn("toggleRoutes");
-      if (hasChildren(select("#temperature"))) turnOn("toggleTemperature");
-      if (hasChild(select("#population"), "line")) turnOn("togglePopulation");
-      if (isVisible(select("#ice"))) turnOn("toggleIce");
-      if (hasChild(select("#prec"), "circle")) turnOn("togglePrecipitation");
-      if (isVisible(select("#emblems")) && hasChild(select("#emblems"), "use")) turnOn("toggleEmblems");
-      if (isVisible(select("#labels"))) turnOn("toggleLabels");
-      if (isVisible(select("#icons"))) turnOn("toggleBurgIcons");
-      if (hasChildren(armies) && isVisible(armies)) turnOn("toggleMilitary");
-      if (hasChild(select("#markers"), "svg")) turnOn("toggleMarkers");
-      if (isVisible(select("#tradeAnimation"))) turnOn("toggleTrade");
-      if (isVisible(select("#goods")) && hasChildren(select("#goods"))) turnOn("toggleGoods");
-      if (isVisible(select("#markets")) && hasChildren(select("#markets"))) turnOn("toggleMarketsLayer");
-      if (isVisible(select("#ruler"))) turnOn("toggleRulers");
-      if (isVisible(select("#scaleBar"))) turnOn("toggleScaleBar");
-      if (isVisibleNode(ensureEl("vignette"))) turnOn("toggleVignette");
-
-      getCurrentPreset();
-      Goods.sync();
-      Markets.sync();
-      Routes.sync();
-      TradeAnimation.sync();
+      const { resolveVersionConflicts } = await import("./auto-update");
+      await resolveVersionConflicts(mapVersion!, data);
     }
+
+    if (data[51]) GraphOverride.restore(JSON.parse(data[51]));
+    if (data[50]) Layers.restore(JSON.parse(data[50]));
+
+    Goods.sync();
+    Markets.sync();
+    Routes.sync();
+    TradeAnimation.sync();
+
     select("#scaleBar")
       .on("mousemove", () => tip("Click to open Units Editor"))
       .on("click", () => window.Controllers.UnitsEditor.open());
     select("#legend")
       .on("mousemove", () => tip("Drag to change the position. Click to hide the legend"))
       .on("click", () => clearLegend());
-
-    {
-      // dynamically import and run auto-update script
-      const { resolveVersionConflicts } = await import("./auto-update");
-      resolveVersionConflicts(mapVersion!, data);
-    }
 
     // add custom heightmap color scheme if any
     if (heightmapColorSchemes) {
@@ -670,7 +571,7 @@ async function parseLoadedData(data: string[], mapVersion: string | null): Promi
 
         if (burg.cell >= cells.i.length) {
           ERROR && console.error("[Data integrity] Burg", burg.i, "is linked to invalid cell", burg.cell);
-          burg.cell = findCell(burg.x, burg.y)!;
+          burg.cell = Pack.findCell(burg.x, burg.y)!;
           cells.i
             .filter(i => cells.burg[i] === burg.i)
             .forEach(i => {
@@ -802,19 +703,15 @@ async function parseLoadedData(data: string[], mapVersion: string | null): Promi
         pack.markers.sort((a, b) => a.i - b.i);
       }
     }
-    // remove href from emblems, to trigger rendering on load
-    select("#emblems").selectAll("use").attr("href", null);
-    // draw data layers (not kept in svg)
-    if (layerIsOn("toggleRulers")) drawMeasurers();
-    if (layerIsOn("toggleGrid")) drawGrid();
-    if (typeof window.applyDefaultViewboxEvents === "function") applyDefaultViewboxEvents();
-    focusOn(); // based on searchParams focus on point, cell or burg
+
+    Layers.drawAll();
+    applyDefaultViewboxEvents();
+    focusOn();
     invokeActiveZooming();
     fitMapToScreen();
 
     WARN && console.warn(`TOTAL: ${rn((performance.now() - uploadTimeStart) / 1000, 2)}s`);
-    showStatistics();
-    INFO && console.groupEnd();
+    logStats();
     tip("Map is successfully loaded", true, "success", 7000);
   } catch (error) {
     ERROR && console.error(error);
@@ -828,7 +725,7 @@ async function parseLoadedData(data: string[], mapVersion: string | null): Promi
       title: "Loading error",
       maxWidth: "40em",
       buttons: {
-        "Clear cache": () => cleanupData(),
+        "Clear cache": () => clearCache(),
         "Select file": function (this: HTMLElement) {
           $(this).dialog("close");
           ensureEl("mapToLoad").click();
@@ -843,6 +740,8 @@ async function parseLoadedData(data: string[], mapVersion: string | null): Promi
       },
       position: { my: "center", at: "center", of: "svg" }
     });
+  } finally {
+    if (loadGroupOpen) console.groupEnd();
   }
 }
 

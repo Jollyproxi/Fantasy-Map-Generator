@@ -1,6 +1,9 @@
 import Alea from "alea";
 import { max } from "d3";
+import { Emblems } from "@/generators/emblems-generator";
+import type { Emblem } from "@/types/emblems";
 import { ensureEl, gauss, generateSeed, getMixedColor, getPolesOfInaccessibility, P, rand, rw } from "../utils";
+import type { Label } from "./labels-generator";
 
 declare global {
   var Provinces: ProvinceModule;
@@ -17,8 +20,9 @@ export interface Province {
   formName: string;
   fullName: string;
   color: string;
-  coa: any;
+  coa: Emblem;
   pole?: [number, number];
+  label?: Label;
   // statistics computed by the provinces editor
   area?: number;
   rural?: number;
@@ -73,7 +77,6 @@ class ProvinceModule {
   }
 
   generate(regenerate = false, regenerateLockedStates = false) {
-    TIME && console.time("generateProvinces");
     const localSeed = regenerate ? generateSeed() : seed;
     Math.random = Alea(localSeed);
 
@@ -132,8 +135,8 @@ class ProvinceModule {
         const color = getMixedColor(s.color!);
         const kinship = nameByBurg ? 0.8 : 0.4;
         const type = Burgs.getType(center, burg.port);
-        const coa = COA.generate(stateBurgs[i].coa, kinship, null, type);
-        coa.shield = COA.getShield(c, s.i);
+        const coa = Emblems.generate(stateBurgs[i].coa, kinship, null, type);
+        coa.shield = Emblems.getShield(c, s.i);
 
         s.provinces.push(provinceId);
         provinces.push({
@@ -259,8 +262,8 @@ class ProvinceModule {
 
         const provCells = stateNoProvince.filter(i => provinceIds[i] === provinceId);
         const singleIsle = provCells.length === f.cells && !provCells.find(i => cells.f[i] !== f.i);
-        const isleGroup = !singleIsle && !provCells.find(i => pack.features[cells.f[i]].group !== "isle");
-        const colony = !singleIsle && !isleGroup && P(0.5) && !isPassable(s.center, center);
+        const isleSubtype = !singleIsle && !provCells.find(i => pack.features[cells.f[i]].subtype !== "isle");
+        const colony = !singleIsle && !isleSubtype && P(0.5) && !isPassable(s.center, center);
 
         const name = (() => {
           const colonyName = colony && P(0.8) && getColonyName();
@@ -271,18 +274,18 @@ class ProvinceModule {
 
         const formName = (() => {
           if (singleIsle) return "Island";
-          if (isleGroup) return "Islands";
+          if (isleSubtype) return "Islands";
           if (colony) return "Colony";
           return rw(this.forms.Wild);
         })();
 
         const fullName = `${name} ${formName}`;
 
-        const dominion = colony ? P(0.95) : singleIsle || isleGroup ? P(0.7) : P(0.3);
+        const dominion = colony ? P(0.95) : singleIsle || isleSubtype ? P(0.7) : P(0.3);
         const kinship = dominion ? 0 : 0.4;
         const type = Burgs.getType(center, burgs[burg]?.port);
-        const coa = COA.generate(s.coa, kinship, dominion ? 1 : 0, type);
-        coa.shield = COA.getShield(c, s.i);
+        const coa = Emblems.generate(s.coa, kinship, dominion ? 1 : 0, type);
+        coa.shield = Emblems.getShield(c, s.i);
 
         provinces.push({
           i: provinceId,
@@ -322,8 +325,6 @@ class ProvinceModule {
 
     cells.province = provinceIds;
     pack.provinces = provinces;
-
-    TIME && console.timeEnd("generateProvinces");
   }
 
   // calculate pole of inaccessibility for each province

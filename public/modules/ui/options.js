@@ -146,7 +146,6 @@ optionsContent.addEventListener("change", event => {
   else if (id === "shapeRendering") setRendering(value);
   else if (id === "yearInput") changeYear();
   else if (id === "eraInput") changeEra();
-  else if (id === "stateLabelsModeInput") options.stateLabelsMode = value;
   else if (id === "azgaarAssistant") toggleAssistant();
 });
 
@@ -195,47 +194,37 @@ function applyGraphSize() {
   graphWidth = +mapWidthInput.value;
   graphHeight = +mapHeightInput.value;
 
-  landmass.select("rect").attr("x", 0).attr("y", 0).attr("width", graphWidth).attr("height", graphHeight);
-  oceanPattern.select("rect").attr("x", 0).attr("y", 0).attr("width", graphWidth).attr("height", graphHeight);
-  oceanLayers.select("rect").attr("x", 0).attr("y", 0).attr("width", graphWidth).attr("height", graphHeight);
-  fogging.selectAll("rect").attr("x", 0).attr("y", 0).attr("width", graphWidth).attr("height", graphHeight);
-  defs.select("mask#fog > rect").attr("width", graphWidth).attr("height", graphHeight);
-  defs.select("mask#water > rect").attr("width", graphWidth).attr("height", graphHeight);
+  d3.select("#landmass").select("rect").attr("x", 0).attr("y", 0).attr("width", graphWidth).attr("height", graphHeight);
+  d3.select("#oceanPattern").select("rect").attr("x", 0).attr("y", 0).attr("width", graphWidth).attr("height", graphHeight);
+  d3.select("#oceanLayers").select("rect").attr("x", 0).attr("y", 0).attr("width", graphWidth).attr("height", graphHeight);
+  d3.select("#fogging").selectAll("rect").attr("x", 0).attr("y", 0).attr("width", graphWidth).attr("height", graphHeight);
+  d3.select("#deftemp").select("mask#fog > rect").attr("width", graphWidth).attr("height", graphHeight);
+  d3.select("#deftemp").select("mask#water > rect").attr("width", graphWidth).attr("height", graphHeight);
 }
 
 // on generate, on load, on resize, on canvas size change
 function fitMapToScreen() {
   svgWidth = Math.min(+mapWidthInput.value, window.innerWidth);
   svgHeight = Math.min(+mapHeightInput.value, window.innerHeight);
-  svg.attr("width", svgWidth).attr("height", svgHeight);
+  d3.select("#map").attr("width", svgWidth).attr("height", svgHeight);
 
   const zoomMin = rn(Math.max(svgWidth / graphWidth, svgHeight / graphHeight), 3);
   zoomExtentMin.value = zoomMin;
   const zoomMax = +zoomExtentMax.value;
 
-  zoom
-    .translateExtent([
-      [0, 0],
-      [graphWidth, graphHeight]
-    ])
-    .scaleExtent([zoomMin, zoomMax]);
+  setTranslateExtent(0, 0, graphWidth, graphHeight);
+  setZoomExtent(zoomMin, zoomMax);
 
-  fitScaleBar(scaleBar, svgWidth, svgHeight);
+  Layers.draw("scaleBar");
   if (window.fitLegendBox) fitLegendBox();
 }
 
 function toggleTranslateExtent(el) {
   const on = (el.dataset.on = +!+el.dataset.on);
   if (on) {
-    zoom.translateExtent([
-      [-graphWidth / 2, -graphHeight / 2],
-      [graphWidth * 1.5, graphHeight * 1.5]
-    ]);
+    setTranslateExtent(-graphWidth / 2, -graphHeight / 2, graphWidth * 1.5, graphHeight * 1.5);
   } else {
-    zoom.translateExtent([
-      [0, 0],
-      [graphWidth, graphHeight]
-    ]);
+    setTranslateExtent(0, 0, graphWidth, graphHeight);
   }
 }
 
@@ -360,8 +349,9 @@ function changeCultureSet() {
 }
 
 function changeEmblemShape(emblemShape) {
+  Emblems.setShape(emblemShape);
   const image = ensureEl("emblemShapeImage");
-  const shapePath = window.COArenderer && COArenderer.shieldPaths[emblemShape];
+  const shapePath = window.EmblemRenderer && EmblemRenderer.shieldPaths[emblemShape];
   shapePath ? image.setAttribute("d", shapePath) : image.removeAttribute("d");
 
   const specificShape = ["culture", "state", "random"].includes(emblemShape) ? null : emblemShape;
@@ -369,15 +359,13 @@ function changeEmblemShape(emblemShape) {
     pack.cultures.filter(c => !c.removed).forEach(c => (c.shield = Cultures.getRandomShield()));
 
   const rerenderCOA = (id, coa) => {
-    const coaEl = ensureEl(id);
-    if (!coaEl) return; // not rendered
-    coaEl.remove();
-    COArenderer.trigger(id, coa);
+    if (!findEl(id)) return; // emblems outside of the viewport are not rendered yet
+    EmblemRenderer.trigger(id, coa);
   };
 
   pack.states.forEach(state => {
     if (!state.i || state.removed || !state.coa || state.coa.custom) return;
-    const newShield = specificShape || COA.getShield(state.culture, null);
+    const newShield = specificShape || Emblems.getShield(state.culture, null);
     if (newShield === state.coa.shield) return;
     state.coa.shield = newShield;
     rerenderCOA("stateCOA" + state.i, state.coa);
@@ -386,7 +374,7 @@ function changeEmblemShape(emblemShape) {
   pack.provinces.forEach(province => {
     if (!province.i || province.removed || !province.coa || province.coa.custom) return;
     const culture = pack.cells.culture[province.center];
-    const newShield = specificShape || COA.getShield(culture, province.state);
+    const newShield = specificShape || Emblems.getShield(culture, province.state);
     if (newShield === province.coa.shield) return;
     province.coa.shield = newShield;
     rerenderCOA("provinceCOA" + province.i, province.coa);
@@ -394,7 +382,7 @@ function changeEmblemShape(emblemShape) {
 
   pack.burgs.forEach(burg => {
     if (!burg.i || burg.removed || !burg.coa || burg.coa.custom) return;
-    const newShield = specificShape || COA.getShield(burg.culture, burg.state);
+    const newShield = specificShape || Emblems.getShield(burg.culture, burg.state);
     if (newShield === burg.coa.shield) return;
     burg.coa.shield = newShield;
     rerenderCOA("burgCOA" + burg.i, burg.coa);
@@ -403,8 +391,12 @@ function changeEmblemShape(emblemShape) {
 
 function changeStatesNumber(value) {
   ensureEl("statesNumber").style.color = +value ? null : "#b12117";
-  burgLabels.select("#capital").attr("data-size", Math.max(rn(6 - value / 20), 3));
-  labels.select("#countries").attr("data-size", Math.max(rn(18 - value / 6), 4));
+  const capitalSize = Math.max(rn(6 - value / 20), 3);
+  const stateSize = Math.max(rn(18 - value / 6), 4);
+  if (style.labels.groups.capital) style.labels.groups.capital["font-size"] = `${capitalSize}%`;
+  if (style.labels.groups.states) style.labels.groups.states["font-size"] = `${stateSize}%`;
+  d3.select("#labels").select("[data-group='capital']").attr("font-size", `${capitalSize}%`);
+  d3.select("#labels").select("[data-group='states']").attr("font-size", `${stateSize}%`);
 }
 
 function changeUiSize(value) {
@@ -519,15 +511,15 @@ function changeZoomExtent(value) {
   const max = Math.min(+zoomExtentMax.value, 200);
   zoomExtentMin.value = min;
   zoomExtentMax.value = max;
-  zoom.scaleExtent([min, max]);
-  const scale = minmax(+value, 0.01, 200);
-  zoom.scaleTo(svg, scale);
+  setZoomExtent(min, max);
+  setMapZoom(minmax(+value, 0.01, 200));
 }
 
 function restoreDefaultZoomExtent() {
   zoomExtentMin.value = 1;
   zoomExtentMax.value = 20;
-  zoom.scaleExtent([1, 20]).scaleTo(svg, 1);
+  setZoomExtent(1, 20);
+  setMapZoom(1);
 }
 
 // restore options stored in localStorage
@@ -565,6 +557,8 @@ function applyStoredOptions() {
     if (key.slice(0, 5) === "style") applyOption(stylePreset, key, key.slice(5));
   }
 
+  Emblems.setShape(emblemShape.value);
+
   if (stored("winds")) options.winds = stored("winds").split(",").map(Number);
   if (stored("temperatureEquator")) options.temperatureEquator = +stored("temperatureEquator");
   if (stored("temperatureNorthPole")) options.temperatureNorthPole = +stored("temperatureNorthPole");
@@ -600,7 +594,6 @@ function applyStoredOptions() {
   changeDialogsTheme(themeColor, transparency);
 
   setRendering(shapeRendering.value);
-  options.stateLabelsMode = stateLabelsModeInput.value;
 }
 
 // randomize options if randomization is allowed (not locked or queryParam options='default')
@@ -667,17 +660,15 @@ function randomizeCultureSet() {
 }
 
 function setRendering(value) {
-  viewbox.attr("shape-rendering", value);
+  d3.select("#viewbox").attr("shape-rendering", value);
 
   if (value === "optimizeSpeed") {
     // block some styles
-    coastline.select("#sea_island").style("filter", "none");
-    statesHalo.style("display", "none");
+    d3.select("#statesHalo").style("display", "none");
   } else {
     // remove style block
-    coastline.select("#sea_island").style("filter", null);
-    statesHalo.style("display", null);
-    if (pack.cells && statesHalo.selectAll("*").size() === 0) drawStates();
+    d3.select("#statesHalo").style("display", null);
+    if (pack.cells && d3.select("#statesHalo").selectAll("*").size() === 0) Layers.draw("states");
   }
 }
 
@@ -755,9 +746,6 @@ function regeneratePrompt(options) {
 }
 
 function showSavePane() {
-  const sharableLinkContainer = ensureEl("sharableLinkContainer");
-  sharableLinkContainer.style.display = "none";
-
   $("#saveMapData").dialog({
     title: "Save map",
     resizable: false,
@@ -777,8 +765,13 @@ function copyLinkToClickboard() {
   navigator.clipboard.writeText(link).then(() => tip("Link is copied to the clipboard", true, "success", 8000));
 }
 
+ensureEl("showLabels").addEventListener("change", function () {
+  options.labels.showAll = Boolean(this.checked);
+  Layers.draw("labels");
+});
+
 function showExportPane() {
-  ensureEl("showLabels").checked = !hideLabels.checked;
+  ensureEl("showLabels").checked = options.labels.showAll;
 
   $("#exportMapData").dialog({
     title: "Export map data",
@@ -809,6 +802,12 @@ async function showLoadPane() {
       }
     }
   });
+
+  // Electron has no Dropbox integration, the whole block is removed from the DOM there
+  if (!findEl("loadFromDropbox")) return;
+
+  // the sharable link belongs to this dialog, drop the one made for a previously selected file
+  ensureEl("sharableLinkContainer").style.display = "none";
 
   // already connected to Dropbox: list saved maps
   if (await window.Services.Cloud.isConnected()) {
@@ -905,7 +904,7 @@ function openExportToPngTiles() {
     },
     close: () => {
       inputs.forEach(input => input.removeEventListener("input", updateTilesOptions));
-      debug.selectAll("*").remove();
+      d3.select("#debug").selectAll("*").remove();
     }
   });
 }
@@ -950,7 +949,7 @@ function updateTilesOptions() {
     }
   }
 
-  debug.html(`
+  d3.select("#debug").html(`
     <g fill='none' stroke='#000'>${rects.join("")}</g>
     <g fill='#000' stroke='none' text-anchor='middle' dominant-baseline='central' font-size='18px'>${labels.join(
       ""

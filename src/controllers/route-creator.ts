@@ -1,22 +1,25 @@
 import { select } from "d3";
-import { closeDialogs } from "@/components/dialog/dialog-helpers";
+import { closeDialogs, destroyDialog } from "@/components/dialog/dialog-helpers";
+import { Layers } from "@/components/layers";
 import { stopMapPlacement } from "@/components/map-placement";
 import { clearMainTip, tip } from "@/components/tooltips";
 import { applyDefaultViewboxEvents } from "@/components/viewbox-events";
 import { Controllers } from "@/controllers";
 import type { Route } from "@/generators/routes-generator";
-import { destroyDialogIfExists, ensureEl, getPackPolygon, getPointer, rn } from "../utils";
+import { ensureEl, getPointer, rn } from "../utils";
 
 let creatorPoints: number[][] = [];
+
+let isCellsLayerForced = false; // the cells layer is turned on for the editing mode
 
 function open(defaultGroup?: string): void {
   if (customization) return;
   stopMapPlacement();
   closeDialogs();
-  if (!layerIsOn("toggleRoutes")) toggleRoutes();
+  Layers.show("routes");
 
-  ensureEl("toggleCells").dataset.forced = String(+!layerIsOn("toggleCells"));
-  if (!layerIsOn("toggleCells")) toggleCells();
+  isCellsLayerForced = !Layers.isOn("cells");
+  Layers.show("cells");
 
   tip("Click to add route point", true);
   select("#debug").append("g").attr("id", "controlCells");
@@ -45,7 +48,7 @@ function open(defaultGroup?: string): void {
 }
 
 function renderDialog(): void {
-  destroyDialogIfExists("routeCreator");
+  destroyDialog("routeCreator");
 
   const html = /* html */ `<div id="routeCreator" class="dialog">
     <div>Click on map to add/remove route points</div>
@@ -63,23 +66,11 @@ function renderDialog(): void {
   ensureEl("dialogs").insertAdjacentHTML("beforeend", html);
 
   // add listeners — dropped together with the dialog HTML on close
-  ensureEl("routeCreatorGroupSelect").on("change", redrawCreatorRoute);
-  ensureEl("routeCreatorGroupEdit").on("click", openRouteGroupsEditor);
-  ensureEl("routeCreatorComplete").on("click", completeCreation);
-  ensureEl("routeCreatorCancel").on("click", cancelCreation);
-  ensureEl("routeCreatorBody").on("click", onBodyClick);
-}
-
-function redrawCreatorRoute(): void {
-  drawRoute(creatorPoints);
-}
-
-function openRouteGroupsEditor(): void {
-  void Controllers.RouteGroupsEditor.open();
-}
-
-function cancelCreation(): void {
-  $("#routeCreator").dialog("close");
+  ensureEl("routeCreatorGroupSelect").addEventListener("change", () => drawRoute(creatorPoints));
+  ensureEl("routeCreatorGroupEdit").addEventListener("click", () => void Controllers.RouteGroupsEditor.open());
+  ensureEl("routeCreatorComplete").addEventListener("click", completeCreation);
+  ensureEl("routeCreatorCancel").addEventListener("click", () => $("#routeCreator").dialog("close"));
+  ensureEl("routeCreatorBody").addEventListener("click", onBodyClick);
 }
 
 function onBodyClick(ev: Event): void {
@@ -89,7 +80,7 @@ function onBodyClick(ev: Event): void {
 
 function onClick(this: any, event: any): void {
   const [x, y] = getPointer(event, this);
-  const cellId = findCell(x, y);
+  const cellId = Pack.findCell(x, y);
   const point = [rn(x, 2), rn(y, 2), cellId!];
   creatorPoints.push(point);
 
@@ -118,7 +109,7 @@ function drawRoute(points: number[][]): void {
     .selectAll("polygon")
     .data(points)
     .join("polygon")
-    .attr("points", (p: number[]) => getPackPolygon(p[2], pack))
+    .attr("points", (p: number[]) => String(Pack.getPolygon(p[2])))
     .attr("class", "current");
 
   select("#debug")
@@ -182,11 +173,10 @@ function closeRouteCreator(): void {
   applyDefaultViewboxEvents();
   clearMainTip();
 
-  const forced = +ensureEl("toggleCells").dataset.forced!;
-  ensureEl("toggleCells").dataset.forced = "0";
-  if (forced && layerIsOn("toggleCells")) toggleCells();
+  if (isCellsLayerForced) Layers.hide("cells");
+  isCellsLayerForced = false;
 
-  destroyDialogIfExists("routeCreator");
+  destroyDialog("routeCreator");
 }
 
 export const RouteCreator = { open };
